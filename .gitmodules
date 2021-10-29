@@ -1,3 +1,6 @@
 [submodule "histdb/third_party/SQLiteCpp"]
 	path = histdb/third_party/SQLiteCpp
 	url = https://github.com/SRombauts/SQLiteCpp.git
+[submodule "histdb/third_party/abseil-cpp"]
+	path = histdb/third_party/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
