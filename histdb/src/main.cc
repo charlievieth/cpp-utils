@@ -19,8 +19,12 @@ namespace fs = std::filesystem;
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
+#define HISTDB_NAME "histdb.sqlite3"
+
 // Options
 ////////////////////////////////////////////////////////////////////////////////
+
+static const int current_schema_migration = 1;
 
 static const char *const create_tables_stmt =R"""(
 BEGIN;
@@ -164,15 +168,29 @@ static void insert_usage(std::ostream& out = std::cout) {
 
 // parse helpers
 
-static std::string getenv_check(const char *env_var) {
-	char *tmp = std::getenv(env_var);
-	if (!tmp || !*tmp) {
-		throw ArgumentException("empty environment variable: " + std::string(env_var));
-	}
-	return std::string(tmp);
+static constexpr std::string_view null_safe_string_view(const char* p) {
+	return p ? std::string_view(p) : std::string_view();
 }
 
-static bool is_ascii_space(unsigned char c) {
+static std::string_view safe_getenv(const char *name) {
+	return null_safe_string_view(std::getenv(name));
+}
+
+static bool get_env_bool(const char *name) {
+	auto s = safe_getenv(name);
+	return s == "1" || s == "t" || s == "T" || s == "true" ||
+		s == "True" || s == "TRUE";
+}
+
+static std::string getenv_check(const char *env_var) {
+	auto val = safe_getenv(env_var);
+	if (val.empty()) {
+		throw ArgumentException("empty environment variable: " + std::string(env_var));
+	}
+	return std::string(val);
+}
+
+static constexpr bool is_ascii_space(unsigned char c) {
 	switch (c) {
 	case '\t':
 	case '\n':
@@ -185,26 +203,23 @@ static bool is_ascii_space(unsigned char c) {
 	return false;
 }
 
-static std::string trim_ansi_space(char *s) {
-	unsigned char *p = (unsigned char *)s;
-	while (p && is_ascii_space(*p)) {
-		p++;
+static std::string trim_ansi_space(const char *s) {
+	while (is_ascii_space(*s)) {
+		s++;
 	};
-	if (p) {
-		s = (char*)p;
-		size_t n = std::strlen(s);
-		p = (unsigned char *)&s[n - 1];
-		while (p && is_ascii_space(*p)) {
-			*p = '\0';
-			p--;
-		};
+	if (*s) {
+		ssize_t n = std::strlen(s) - 1;
+		while (n >= 0 && is_ascii_space(s[n])) {
+			n--;
+		}
+		return std::string(s, n + 1);
 	}
-	return s;
+	return std::string();
 }
 
 // command line parsers
 
-static void parse_insert_cmd_argments(int argc, char *argv[]) {
+static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 	int ch;
 	int opt_index = 0;
 	bool status_set = false;
@@ -263,25 +278,34 @@ static void parse_insert_cmd_argments(int argc, char *argv[]) {
 
 	argc -= optind;
 	argv += optind;
-	if (argc != 2) {
-		throw ArgumentException("expected 2 arguments ([HISTORY_ID] [RAW_COMMAND]) got: " +
+	if (argc != 1) {
+		// std::cerr << "ARG: " << argv[0] << std::endl;
+		throw ArgumentException("expected 1 argument ([HISTORY_ID RAW_COMMAND]) got: " +
 			std::to_string(argc));
 	}
 
-	history_id = std::strtoll(argv[0], NULL, 10);
+	char *p_end;
+	char *raw = argv[0];
+	history_id = std::strtoll(raw, &p_end, 10);
 	if (history_id <= 0) {
 		throw ArgumentException("non-positive: HISTORY_ID: " + std::to_string(history_id));
 	}
-	if (!argv[1] || !*argv[1]) {
+	raw = p_end;
+	if (!raw || !*raw) {
 		throw ArgumentException("empty argument: RAW_HISTORY");
 	}
-	raw_history = trim_ansi_space(argv[1]);
+	raw_history = trim_ansi_space(raw);
 
+	// TODO: use getwd() to get the absolute WD since PWD can be wrong
+	// or on macOS the casing can differ from the actual WD.
 	current_wd = getenv_check("PWD");
 	current_user = getenv_check("USER");;
 }
 
-static void parse_session_cmd_argments(int argc, char *argv[]) {
+static void parse_session_cmd_argments(int argc, char * const argv[]) {
+	if (argc == 0) {
+		return;
+	}
 	int ch;
 	int opt_index = 0;
 	// getopt_long is bad and this is kinda broken for --eval
@@ -319,57 +343,73 @@ static void parse_session_cmd_argments(int argc, char *argv[]) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// #define HISTDB_NAME "test_histdb.sqlite3"
-// HERE HERE HERE
-
-bool get_bool_env(const char *name) {
-	char *s = std::getenv(name);
-	if (s) {
-		switch (std::strlen(s)) {
-		case 1:
-			switch (*s) {
-			case '1':
-			case 't':
-			case 'T':
-				return true;
-			}
-		case 4:
-			auto x = std::string(s);
-			return x == "true" || x == "True" || x == "TRUE";
-			return std::strcmp(s, "true") == 0 ||
-				std::strcmp(s, "TRUE") == 0 ||
-				std::strcmp(s, "True") == 0;
-		}
-	}
-	return false;
-}
-
-fs::path user_data_dir() {
-	char *s = std::getenv("XDG_DATA_HOME");
-	if (s && *s) {
+static fs::path user_data_dir() {
+	auto s = safe_getenv("XDG_DATA_HOME");
+	if (!s.empty()) {
 		return s;
 	}
-	s = std::getenv("HOME");
-	if (s && *s) {
+	s = safe_getenv("HOME");
+	if (!s.empty()) {
 		return fs::path(s) / ".local" / "share";
 	}
 	throw ArgumentException("neither $XDG_DATA_HOME nor $HOME are defined");
 }
 
-static SQLite::Database open_database(const char *filename, bool readonly = false) {
+static fs::path histdb_database_path() {
+	// Pedantically guard against writing to the real database.
+	// TODO: Remove this once testing is done.
+	if (!get_env_bool("HISTDB_PROD")) {
+		return "test.sqlite3";
+	}
+	return user_data_dir() / "histdb" / "data" / HISTDB_NAME;
+}
+
+static bool should_migrate_database(SQLite::Database& db) {
+	if (!db.tableExists("schema_migrations")) {
+		return true;
+	}
+	SQLite::Statement query(
+		db, "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;"
+	);
+	if (!query.executeStep()) {
+		return true;
+	}
+	int version = query.getColumn(0).getInt();
+
+	// The database is running a schema version that we don't know about.
+	if (unlikely(version > current_schema_migration)) {
+		throw std::runtime_error(
+			"database schema (" + std::to_string(version) + ") exceeds our "
+			"version (" + std::to_string(current_schema_migration) + ")"
+		);
+	}
+
+	return version < current_schema_migration;
+}
+
+static SQLite::Database open_database(std::string& filename, bool readonly = false) {
 	int flags = readonly ?
 		SQLite::OPEN_READONLY :
 		SQLite::OPEN_READWRITE|SQLite::OPEN_CREATE;
 	SQLite::Database db = SQLite::Database(filename, flags);
-	if (!db.tableExists("history")) {
-		db.exec(create_tables_stmt);
-	}
 	db.exec(
 		"PRAGMA foreign_keys = 1;\n"
 		"PRAGMA journal_mode = 'PERSIST';\n"
 		"PRAGMA locking_mode = 'EXCLUSIVE';"
 	);
+	if (should_migrate_database(db)) {
+		db.exec(create_tables_stmt);
+	}
 	return db;
+}
+
+static SQLite::Database open_default_database(bool readonly = false) {
+	auto name = fs::path(histdb_database_path());
+	if (!fs::exists(name)) {
+		fs::create_directories(fs::path(name).remove_filename());
+	}
+	auto s = name.string();
+	return open_database(s, readonly);
 }
 
 static void check_errno(int ret, int exp = 0) {
@@ -385,23 +425,46 @@ static void check_errno(int ret, int exp = 0) {
 	}
 }
 
+static char *code_us_fraction(int32_t us, char *p) {
+	if (us == 0) {
+		*p = '\0';
+		return p;
+	}
+	int i = 6;
+	*p++ = '.';
+	while (us % 10 == 0) {
+		us /= 10;
+		i--;
+	}
+	p[i] = '\0';
+	char *end = &p[i];
+	for (;;) {
+		p[--i] = '0' + us % 10;
+		if (i == 0) {
+			break;
+		}
+		us /= 10;
+	}
+	return end;
+}
+
 static int format_timeval(struct timeval *tv, std::string& dst) {
 	struct tm *tm_info = std::localtime(&tv->tv_sec);
 	assert(tm_info);
 
 	int n;
-	char zone[8];
-	char format[32];
+	char format[34];
 	char buffer[34];
+
+	std::strcpy(format, "%Y-%m-%dT%H:%M:%S");
+	char *frac = &format[std::strlen("%Y-%m-%dT%H:%M:%S")];
+	char *zone = code_us_fraction(tv->tv_usec, frac);
+
 	// convert: -0400 => -04:00
 	if (std::strftime(zone, sizeof(zone), "%z", tm_info) == 5) {
 		std::memmove(&zone[4], &zone[3], 3);
 		zone[3] = ':';
 	}
-
-	n = snprintf(format, sizeof(format), "%%Y-%%m-%%dT%%H:%%M:%%S" ".%04d" "%s",
-		tv->tv_usec, zone);
-	assert((size_t)n <= sizeof(format));
 
 	n = std::strftime(buffer, sizeof(buffer), format, tm_info);
 	assert(n != 0);
@@ -457,7 +520,7 @@ static int64_t new_session_id(SQLite::Database& db) {
 	return db.getLastInsertRowid();
 }
 
-static int session_id_command(int argc, char *argv[]) {
+static int session_id_command(int argc, char * const argv[]) {
 	// TODO: handle all of our exceptions
 	try {
 		parse_session_cmd_argments(argc, argv);
@@ -465,7 +528,7 @@ static int session_id_command(int argc, char *argv[]) {
 			session_usage();
 			return EXIT_SUCCESS;
 		}
-		SQLite::Database db = open_database("test.sqlite3");
+		SQLite::Database db = open_default_database();
 		int64_t id = new_session_id(db);
 		if (print_eval) {
 			std::cout << "export HISTDB_SESSION_ID=" << id << ";" << std::endl;
@@ -489,14 +552,14 @@ static int session_id_command(int argc, char *argv[]) {
 	return EXIT_FAILURE;
 }
 
-static int insert_command(int argc, char *argv[]) {
+static int insert_command(int argc, char * const argv[]) {
 	try {
 		parse_insert_cmd_argments(argc, argv);
 		if (print_usage) {
 			insert_usage();
 			return EXIT_SUCCESS;
 		}
-		SQLite::Database db = open_database("test.sqlite3");
+		SQLite::Database db = open_default_database();
 		insert_history_record(db);
 		return EXIT_SUCCESS;
 
@@ -515,30 +578,35 @@ static int insert_command(int argc, char *argv[]) {
 	return EXIT_FAILURE;
 }
 
-int main(int argc, char *argv[]) {
-	if (argc == 1) {
+int main(int argc, char * const argv[]) {
+	if (argc <= 1) {
 		root_usage(std::cerr);
 		return EXIT_FAILURE;
 	}
 
-	if (std::strcmp(argv[1], "session") == 0) {
-		return session_id_command(argc - 1, &argv[1]);
-	}
-	if (std::strcmp(argv[1], "insert") == 0) {
-		return insert_command(argc - 1, &argv[1]);
-	}
-	if (std::strcmp(argv[1], "-h") == 0 || std::strcmp(argv[1], "--help") == 0) {
+	// consume exe and command
+	auto cmd = null_safe_string_view(argv[1]);
+	argv += 1;
+	argc -= 1;
+
+	if (cmd == "-h" || cmd == "--help") {
 		root_usage();
-		return EXIT_FAILURE;
+		return 0;
+	}
+	if (cmd == "session") {
+		return session_id_command(argc, argv);
+	}
+	if (cmd == "insert") {
+		return insert_command(argc, argv);
 	}
 
 	// invalid arg
-	if (*argv[1] == '-') {
+	if (cmd.size() > 0 && cmd.at(0) == '-') {
 		// invalid flag
-		std::cerr << "Error: unknown flag: '" << argv[1] << "'\n";
+		std::cerr << "Error: unknown flag: '" << cmd << "'\n";
 	} else {
 		// invalid command
-		std::cerr << "Error: unknown command: \"" << argv[1] << "\" for \"histdb\"\n";
+		std::cerr << "Error: unknown command: \"" << cmd << "\" for \"histdb\"\n";
 	}
 	std::cerr << "Run 'histdb --help' for usage." << std::endl;
 	return EXIT_FAILURE;
