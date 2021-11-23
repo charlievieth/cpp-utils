@@ -21,3 +21,11 @@ CMakeFiles
 *.dir
 Testing
 Win32
+
+.cache
+.cmake
+Makefile
+compile_commands.json
+
+/tags
+/test.sqlite*
