@@ -114,8 +114,8 @@ static int status_code = 0;
 static long long session = 0;
 static long long history_id = 0;
 static std::string raw_history;
-std::string current_wd;
-std::string current_user;
+static std::string current_wd;
+static std::string current_user;
 
 static int opt_val;
 static struct option insert_cmd_opts[] = {
