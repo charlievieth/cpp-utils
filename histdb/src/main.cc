@@ -119,21 +119,21 @@ static std::string current_user;
 
 static int opt_val;
 static struct option insert_cmd_opts[] = {
-	{"debug",        no_argument,       NULL, 'd'},
-	{"help",         no_argument,       NULL, 'h'},
-	{"session",      required_argument, NULL, 's'},
-	{"status-code",  required_argument, NULL, 'c'},
-	{"dry-run",      no_argument,       &opt_val, 1}, // TODO: remove if not used
-	{NULL, 0, NULL, 0}, // zero pad end
+	{"debug",       no_argument,       nullptr, 'd'},
+	{"help",        no_argument,       nullptr, 'h'},
+	{"session",     required_argument, nullptr, 's'},
+	{"status-code", required_argument, nullptr, 'c'},
+	{"dry-run",     no_argument,       &opt_val, 1}, // TODO: remove if not used
+	{nullptr,       0,                 nullptr,  0}, // zero pad end
 };
 
 // session command options
 
 static bool print_eval = false;
 static struct option session_cmd_opts[] = {
-	{"help",         no_argument,       NULL, 'h'},
-	{"eval",         no_argument,       NULL, 'e'}, // print evalable output
-	{NULL, 0, NULL, 0}, // zero pad end
+	{"help",  no_argument, nullptr, 'h'},
+	{"eval",  no_argument, nullptr, 'e'}, // print evalable output
+	{nullptr, 0,           nullptr, 0},   // zero pad end
 };
 
 // expections (TODO: move to separate file)
@@ -235,7 +235,7 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 			print_usage = true;
 			break;
 		case 's':
-			session = std::strtoll(optarg, NULL, 10);
+			session = std::strtoll(optarg, nullptr, 10);
 			if (session <= 0) {
 				throw ArgumentException("non-positive session: " + std::to_string(session));
 			}
@@ -243,7 +243,7 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 			break;
 		case 'c':
 			// TODO: check for any exceptions
-			status_code = std::stoi(optarg, NULL, 10);
+			status_code = std::stoi(optarg, nullptr, 10);
 			status_set = true;
 			break;
 		case 0:
@@ -475,7 +475,7 @@ static int format_timeval(struct timeval *tv, std::string& dst) {
 
 static std::string get_current_timestamp() {
 	struct timeval tv;
-	check_errno(gettimeofday(&tv, NULL));
+	check_errno(gettimeofday(&tv, nullptr));
 	std::string s;
 	format_timeval(&tv, s);
 	return s;
@@ -486,7 +486,7 @@ static std::string get_boot_time() {
 	int mib[2] = { CTL_KERN, KERN_BOOTTIME };
 	size_t size = sizeof(boot);
 
-	check_errno(sysctl(mib, 2, &boot, &size, NULL, 0));
+	check_errno(sysctl(mib, 2, &boot, &size, nullptr, 0));
 
 	std::string s;
 	format_timeval(&boot, s);
