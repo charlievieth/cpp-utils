@@ -603,10 +603,10 @@ int main(int argc, char * const argv[]) {
 	// invalid arg
 	if (cmd.size() > 0 && cmd.at(0) == '-') {
 		// invalid flag
-		std::cerr << "Error: unknown flag: '" << cmd << "'\n";
+		std::cerr << "error: unknown flag: '" << cmd << "'\n";
 	} else {
 		// invalid command
-		std::cerr << "Error: unknown command: \"" << cmd << "\" for \"histdb\"\n";
+		std::cerr << "error: unknown command: \"" << cmd << "\" for \"histdb\"\n";
 	}
 	std::cerr << "Run 'histdb --help' for usage." << std::endl;
 	return EXIT_FAILURE;
