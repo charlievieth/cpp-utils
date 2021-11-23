@@ -1,17 +1,16 @@
+#include <iostream>
 #include <string>
 #include <cstring>
-#include <iostream>
-#include <sstream>
-#include <cerrno>
 #include <ctime>
+#include <chrono>
+#include <cerrno>
 
 #include <filesystem>
 namespace fs = std::filesystem;
 
-#include <assert.h>
-#include <sys/sysctl.h>
-#include <sys/time.h> // gettimeofday, timeval
-#include <getopt.h>
+#include <sys/sysctl.h> // sysctl (for boot time)
+#include <sys/time.h>   // timeval
+#include <getopt.h>     // getopt_long
 
 #include <SQLiteCpp/Database.h>
 
@@ -141,7 +140,6 @@ static struct option session_cmd_opts[] = {
 class ErrnoException : public std::runtime_error {
 public:
 	ErrnoException(const std::string& message) : std::runtime_error(message) {}
-	// ErrnoException(const int _errno) : std::runtime_error(message) {}
 };
 
 class ArgumentException : public std::invalid_argument {
@@ -412,25 +410,15 @@ static SQLite::Database open_default_database(bool readonly = false) {
 	return open_database(s, readonly);
 }
 
-static void check_errno(int ret, int exp = 0) {
-	if (unlikely(ret != exp)) {
-		char *str = std::strerror(errno);
-		std::string msg;
-		msg.reserve(std::strlen(str) + 14); // 14 == strlen("error: 12345: ")
-		msg.append("error: ");
-		msg.append(std::to_string(errno));
-		msg.append(": ");
-		msg.append(str);
-		throw ErrnoException(msg);
-	}
-}
-
-static char *code_us_fraction(int32_t us, char *p) {
+// code_us_fraction encodes microsecond fraction us into char p. The behavior
+// is undefined if us is greater than one second or if p is not large enough
+// to store the fraction and leading '.'.
+static char *code_us_fraction(int64_t us, char *p) {
 	if (us == 0) {
 		*p = '\0';
 		return p;
 	}
-	int i = 6;
+	int32_t i = 6;
 	*p++ = '.';
 	while (us % 10 == 0) {
 		us /= 10;
@@ -448,54 +436,58 @@ static char *code_us_fraction(int32_t us, char *p) {
 	return end;
 }
 
-static int format_timeval(struct timeval *tv, std::string& dst) {
-	struct tm *tm_info = std::localtime(&tv->tv_sec);
-	assert(tm_info);
+static std::string format_time(const std::chrono::time_point<std::chrono::system_clock> now) {
+	const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+		now - std::chrono::floor<std::chrono::seconds>(now)
+	);
 
-	int n;
-	char format[34];
-	char buffer[34];
+	const std::time_t tt = std::chrono::system_clock::to_time_t(now);
+	const std::tm tm = *std::localtime(&tt);
 
-	std::strcpy(format, "%Y-%m-%dT%H:%M:%S");
+	char format[32] = "%Y-%m-%dT%H:%M:%S";
 	char *frac = &format[std::strlen("%Y-%m-%dT%H:%M:%S")];
-	char *zone = code_us_fraction(tv->tv_usec, frac);
 
-	// convert: -0400 => -04:00
-	if (std::strftime(zone, sizeof(zone), "%z", tm_info) == 5) {
+	// convert zone (-0400 => -04:00) and append it to the format string
+	char *zone = code_us_fraction(us.count(), frac);
+	if (std::strftime(zone, sizeof(zone), "%z", &tm) == 5) {
 		std::memmove(&zone[4], &zone[3], 3);
 		zone[3] = ':';
 	}
 
-	n = std::strftime(buffer, sizeof(buffer), format, tm_info);
-	assert(n != 0);
+	auto dest = std::string(34, '\0');
+	std::size_t n = std::strftime(&dest.at(0), dest.capacity(), format, &tm);
+	if (unlikely(n == 0)) {
+		throw std::runtime_error("error: failed to format time");
+	}
+	dest.resize(n);
 
-	dst.append(buffer, n);
-	return 0;
-}
-
-static std::string get_current_timestamp() {
-	struct timeval tv;
-	check_errno(gettimeofday(&tv, nullptr));
-	std::string s;
-	format_timeval(&tv, s);
-	return s;
+	return dest;
 }
 
 static std::string get_boot_time() {
-	struct timeval boot;
 	int mib[2] = { CTL_KERN, KERN_BOOTTIME };
+	struct timeval boot;
 	size_t size = sizeof(boot);
 
-	check_errno(sysctl(mib, 2, &boot, &size, nullptr, 0));
+	if (unlikely(sysctl(mib, 2, &boot, &size, nullptr, 0) != 0)) {
+		char *err = std::strerror(errno);
+		throw ErrnoException(
+			"error: " + std::to_string(errno) + ": " + std::string(err ? err : "NONE")
+		);
+	}
 
-	std::string s;
-	format_timeval(&boot, s);
-	return s;
+	// NB: We rely on the epoch of the system_clock being the Unix epoch,
+	// which is unspecified until C++20.
+	auto unix = std::chrono::seconds(boot.tv_sec) +
+		std::chrono::microseconds(boot.tv_usec);
+	return format_time(
+		std::chrono::time_point<std::chrono::system_clock>(unix)
+	);
 }
 
 // TODO: pass in the raw history and trim whitespace
 static void insert_history_record(SQLite::Database& db) {
-	auto ts = get_current_timestamp();
+	auto ts = format_time(std::chrono::system_clock::now());
 	auto ppid = getppid();
 	SQLite::Statement query(db, insert_history_stmt);
 	query.bind(1, session);
