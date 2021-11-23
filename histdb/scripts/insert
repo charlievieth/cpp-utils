@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# change to parent directory
+cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/.."
+
+[[ -x ./main ]] || make -j4
+SESSION_ID="$(./main session)"
+echo "SESSION_ID: $SESSION_ID"
+
+# ./main insert -s "$SESSION_ID" -c 0 -- 123 "cat $RANDOM"
+./main insert --session "$SESSION_ID" --status-code=0 -- "321 cat $RANDOM"
