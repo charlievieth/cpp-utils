@@ -470,9 +470,9 @@ static std::string get_boot_time() {
 	size_t size = sizeof(boot);
 
 	if (unlikely(sysctl(mib, 2, &boot, &size, nullptr, 0) != 0)) {
-		char *err = std::strerror(errno);
+		auto err = null_safe_string_view(std::strerror(errno));
 		throw ErrnoException(
-			"error: " + std::to_string(errno) + ": " + std::string(err ? err : "NONE")
+			"error: " + std::to_string(errno) + ": " + std::string(err)
 		);
 	}
 
