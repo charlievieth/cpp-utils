@@ -13,19 +13,22 @@ namespace fs = std::filesystem;
 #include <getopt.h>     // getopt_long
 
 #include <SQLiteCpp/Database.h>
+#include "absl/strings/string_view.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 
 // TODO: use or remove
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
-#define HISTDB_NAME "histdb.sqlite3"
+constexpr std::string_view HISTDB_NAME = "histdb.sqlite3";
 
 // Options
 ////////////////////////////////////////////////////////////////////////////////
 
 static const int current_schema_migration = 1;
 
-static const char *const create_tables_stmt =R"""(
+constexpr char create_tables_stmt[] = R"""(
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS session_ids (
@@ -56,7 +59,7 @@ INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
 COMMIT;
 )""";
 
-static const char *const insert_history_stmt =R"""(
+constexpr char insert_history_stmt[] = R"""(
 INSERT INTO history (
 	session_id,
 	history_id,
@@ -69,7 +72,7 @@ INSERT INTO history (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 )""";
 
-static const char *const root_usage_msg =R"""(histdb: shell history tool
+constexpr std::string_view root_usage_msg = R"""(histdb: shell history tool
 
 Usage:
   histdb [command]
@@ -77,11 +80,12 @@ Usage:
 Available Commands:
   session: return a new session id
   insert:  insert a history entry
+  info:    print information about the histdb environment
 
 Use "histdb [command] --help" for more information about a command.
 )""";
 
-static const char *const insert_help_msg =R"""(insert a shell command into the histdb
+constexpr std::string_view insert_help_msg = R"""(insert a shell command into the histdb
 
 Usage:
   histdb insert [flags] [history_id] [raw_command]
@@ -94,7 +98,7 @@ Flags:
     -h, --help           help for insert
 )""";
 
-static const char *const session_help_msg =R"""(initiate a new histdb session
+constexpr std::string_view session_help_msg = R"""(initiate a new histdb session
 
 Usage:
   histdb session [flags]
@@ -117,7 +121,7 @@ static std::string current_wd;
 static std::string current_user;
 
 static int opt_val;
-static struct option insert_cmd_opts[] = {
+static const struct option insert_cmd_opts[] = {
 	{"debug",       no_argument,       nullptr, 'd'},
 	{"help",        no_argument,       nullptr, 'h'},
 	{"session",     required_argument, nullptr, 's'},
@@ -129,7 +133,7 @@ static struct option insert_cmd_opts[] = {
 // session command options
 
 static bool print_eval = false;
-static struct option session_cmd_opts[] = {
+static const struct option session_cmd_opts[] = {
 	{"help",  no_argument, nullptr, 'h'},
 	{"eval",  no_argument, nullptr, 'e'}, // print evalable output
 	{nullptr, 0,           nullptr, 0},   // zero pad end
@@ -148,42 +152,36 @@ public:
 };
 
 // usage helpers
+// TODO: remove these
 
-static void root_usage(std::ostream& out = std::cout) {
-	out << root_usage_msg;
-	out.flush();
-}
+// static void print_usage_message(const std::string_view msg, std::ostream& out = std::cout) {
+// 	if (auto n = msg.length(); n > 0 && msg[n-1] == '\n') {
+// 		out << msg;
+// 	} else {
+// 		out << msg << std::endl;
+// 	}
+// }
 
-static void session_usage(std::ostream& out = std::cout) {
-	out << session_help_msg;
-	out.flush();
-}
-
-static void insert_usage(std::ostream& out = std::cout) {
-	out << insert_help_msg;
-	out.flush();
-}
+static void root_usage(std::ostream& out = std::cout)    { out << root_usage_msg; }
+static void session_usage(std::ostream& out = std::cout) { out << session_help_msg; }
+static void insert_usage(std::ostream& out = std::cout)  { out << insert_help_msg; }
 
 // parse helpers
 
-static constexpr std::string_view null_safe_string_view(const char* p) {
-	return p ? std::string_view(p) : std::string_view();
-}
-
 static std::string_view safe_getenv(const char *name) {
-	return null_safe_string_view(std::getenv(name));
+	return absl::NullSafeStringView(std::getenv(name));
 }
 
 static bool get_env_bool(const char *name) {
 	auto s = safe_getenv(name);
-	return s == "1" || s == "t" || s == "T" || s == "true" ||
-		s == "True" || s == "TRUE";
+	return static_cast<bool>(s == "1" || s == "t" || s == "T" || s == "true" ||
+		s == "True" || s == "TRUE");
 }
 
-static std::string getenv_check(const char *env_var) {
+static std::string must_getenv(const char *env_var) {
 	auto val = safe_getenv(env_var);
-	if (val.empty()) {
-		throw ArgumentException("empty environment variable: " + std::string(env_var));
+	if (unlikely(val.empty())) {
+		throw ArgumentException(absl::StrCat("empty environment variable: ", env_var));
 	}
 	return std::string(val);
 }
@@ -201,7 +199,7 @@ static constexpr bool is_ascii_space(unsigned char c) {
 	return false;
 }
 
-static std::string trim_ansi_space(const char *s) {
+static std::string trim_ascii_space(const char *s) {
 	while (is_ascii_space(*s)) {
 		s++;
 	};
@@ -235,7 +233,7 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 		case 's':
 			session = std::strtoll(optarg, nullptr, 10);
 			if (session <= 0) {
-				throw ArgumentException("non-positive session: " + std::to_string(session));
+				throw ArgumentException(absl::StrCat("non-positive session: ", session));
 			}
 			session_set = true;
 			break;
@@ -251,11 +249,11 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 				std::cerr << "--dry-run is not supported";
 				break;
 			default:
-				throw ArgumentException("invalid argument: " + std::to_string(opt_val));
+				throw ArgumentException(absl::StrCat("invalid argument: ", opt_val));
 				break;
 			}
 		default:
-			throw ArgumentException("invalid argument: " + std::to_string(ch));
+			throw ArgumentException(absl::StrCat("invalid argument: ", ch));
 			break;
 		}
 	}
@@ -278,26 +276,29 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 	argv += optind;
 	if (argc != 1) {
 		// std::cerr << "ARG: " << argv[0] << std::endl;
-		throw ArgumentException("expected 1 argument ([HISTORY_ID RAW_COMMAND]) got: " +
-			std::to_string(argc));
+		throw ArgumentException(absl::StrCat(
+			"expected 1 argument ([HISTORY_ID RAW_COMMAND]) got: ", argc
+		));
 	}
 
 	char *p_end;
 	char *raw = argv[0];
 	history_id = std::strtoll(raw, &p_end, 10);
 	if (history_id <= 0) {
-		throw ArgumentException("non-positive: HISTORY_ID: " + std::to_string(history_id));
+		throw ArgumentException(absl::StrCat("non-positive: HISTORY_ID: ", history_id));
 	}
 	raw = p_end;
 	if (!raw || !*raw) {
 		throw ArgumentException("empty argument: RAW_HISTORY");
 	}
-	raw_history = trim_ansi_space(raw);
+	raw_history = trim_ascii_space(raw);
 
+	// TODO: clean PWD via .lexically_normal()
+	//
 	// TODO: use getwd() to get the absolute WD since PWD can be wrong
 	// or on macOS the casing can differ from the actual WD.
-	current_wd = getenv_check("PWD");
-	current_user = getenv_check("USER");;
+	current_wd = must_getenv("PWD");
+	current_user = must_getenv("USER");;
 }
 
 static void parse_session_cmd_argments(int argc, char * const argv[]) {
@@ -316,7 +317,7 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 			print_eval = true;
 			break;
 		default:
-			throw ArgumentException("invalid argument: " + std::to_string(ch));
+			throw ArgumentException(absl::StrCat("invalid argument: ", ch));
 			break;
 		}
 	}
@@ -326,16 +327,13 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 	argc -= optind;
 	argv += optind;
 	if (argc != 0) {
-		auto msg = std::string("unexpected arguments: ");
-		msg.append("\"");
-		msg.append(argv[0]);
-		msg.append("\"");
-		for (int i = 1; i < argc; i++) {
-			msg.append(", \"");
-			msg.append(argv[i]);
-			msg.append("\"");
+		std::vector<absl::string_view> extra;
+		for (int i = 0; i < argc; i++) {
+			extra.push_back(absl::string_view(argv[i]));
 		}
-		throw ArgumentException(msg);
+		throw ArgumentException(
+			absl::StrCat("unexpected arguments: ", absl::StrJoin(extra, ", "))
+		);
 	}
 }
 
@@ -376,10 +374,10 @@ static bool should_migrate_database(SQLite::Database& db) {
 
 	// The database is running a schema version that we don't know about.
 	if (unlikely(version > current_schema_migration)) {
-		throw std::runtime_error(
-			"database schema (" + std::to_string(version) + ") exceeds our "
-			"version (" + std::to_string(current_schema_migration) + ")"
-		);
+		throw std::runtime_error(absl::StrCat(
+			"database schema (", version, ") exceeds program ",
+			"version (", current_schema_migration, ")"
+		));
 	}
 
 	return version < current_schema_migration;
@@ -447,9 +445,15 @@ static std::string format_time(const std::chrono::time_point<std::chrono::system
 	char format[32] = "%Y-%m-%dT%H:%M:%S";
 	char *frac = &format[std::strlen("%Y-%m-%dT%H:%M:%S")];
 
-	// convert zone (-0400 => -04:00) and append it to the format string
+	// append microseconds to the format string => "%Y-%m-%dT%H:%M:%S.01234"
+	// zone is the new end of the format string
 	char *zone = code_us_fraction(us.count(), frac);
-	if (std::strftime(zone, sizeof(zone), "%z", &tm) == 5) {
+
+	// bytes remaining in the format string after appending microseconds
+	auto bufsz = sizeof(format) - ptrdiff_t(zone - format);
+
+	// convert zone (-0400 => -04:00) and append it to the format string
+	if (std::strftime(zone, bufsz, "%z", &tm) == 5) {
 		std::memmove(&zone[4], &zone[3], 3);
 		zone[3] = ':';
 	}
@@ -470,10 +474,9 @@ static std::string get_boot_time() {
 	size_t size = sizeof(boot);
 
 	if (unlikely(sysctl(mib, 2, &boot, &size, nullptr, 0) != 0)) {
-		auto err = null_safe_string_view(std::strerror(errno));
-		throw ErrnoException(
-			"error: " + std::to_string(errno) + ": " + std::string(err)
-		);
+		throw ErrnoException(absl::StrCat(
+			"error: ", errno, ": ", absl::NullSafeStringView(std::strerror(errno))
+		));
 	}
 
 	// NB: We rely on the epoch of the system_clock being the Unix epoch,
@@ -506,7 +509,7 @@ static int64_t new_session_id(SQLite::Database& db) {
 	SQLite::Statement query(
 		db, "INSERT INTO session_ids (ppid, boot_time) VALUES (?, ?);"
 	);
-	query.bind(1, (int)getppid());
+	query.bind(1, static_cast<int32_t>(getppid()));
 	query.bind(2, get_boot_time());
 	query.exec();
 	return db.getLastInsertRowid();
@@ -577,19 +580,24 @@ int main(int argc, char * const argv[]) {
 	}
 
 	// consume exe and command
-	auto cmd = null_safe_string_view(argv[1]);
+	auto cmd = absl::NullSafeStringView(argv[1]);
 	argv += 1;
 	argc -= 1;
 
-	if (cmd == "-h" || cmd == "--help") {
-		root_usage();
-		return 0;
-	}
 	if (cmd == "session") {
 		return session_id_command(argc, argv);
 	}
 	if (cmd == "insert") {
 		return insert_command(argc, argv);
+	}
+	// TODO: document this
+	if (cmd == "info") {
+		std::cout << "database: " << histdb_database_path() << std::endl;
+		return 0;
+	}
+	if (cmd == "-h" || cmd == "--help") {
+		root_usage();
+		return 0;
 	}
 
 	// invalid arg

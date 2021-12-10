@@ -7,6 +7,7 @@ project(
 	LANGUAGES CXX)
 
 # Optionally set things like CMAKE_CXX_STANDARD, CMAKE_POSITION_INDEPENDENT_CODE here
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_CXX_STANDARD)
 	set(CMAKE_CXX_STANDARD 17)
 elseif(CMAKE_CXX_STANDARD LESS 17)
@@ -18,6 +19,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -pedantic-errors -Wshadow")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wswitch-enum -Wcast-qual -Wpointer-arith -Wunused")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstrict-overflow=5 -Wcast-align")
+
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
 
 # Experimental
 #
@@ -34,17 +37,43 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstring-compare")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
 
+# get_filename_component(third_party_dir "./third_party" ABSOLUTE)
+
+# main
+add_executable(main src/main.cc)
+
+# SQLiteCpp
+set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_RUN_CPPLINT OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_USE_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/SQLiteCpp)
+target_link_libraries(main SQLiteCpp)
+
+# abseil-cpp
+set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/abseil-cpp)
+target_link_libraries(main absl::strings)
+
+
+# target_link_libraries(main
+# 	sqlite3
+# 	SQLiteCpp
+# 	pthread
+# 	dl)
+
+
+# include(ExternalProject)
+# ExternalProject_Add(SQLiteCpp
+# 	PREFIX SQLiteCpp
+# 	SOURCE_DIR "${third_party_dir}"
+# 	GIT_REPOSITORY "https://github.com/SRombauts/SQLiteCpp.git"
+# 	GIT_TAG "3.1.1"
+#     CMAKE_CACHE_ARGS "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
+# 					 ${ARGN})
+# add_dependencies(histdb, SQLiteCpp)
 
 # set(ABSL_PROPAGATE_CXX_STD ON)
 # add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/abseil-cpp)
-
-add_executable(main src/main.cc)
-target_link_libraries(main
-	SQLiteCpp
-	sqlite3
-	pthread
-	dl)
 
 # # Let's ensure -std=c++xx instead of -std=g++xx
 # # set(CMAKE_CXX_EXTENSIONS OFF)
