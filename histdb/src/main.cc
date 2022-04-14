@@ -17,6 +17,8 @@ namespace fs = std::filesystem;
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 
+#include <histdb/exception.h>
+
 // TODO: use or remove
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -139,29 +141,6 @@ static const struct option session_cmd_opts[] = {
 	{nullptr, 0,           nullptr, 0},   // zero pad end
 };
 
-// expections (TODO: move to separate file)
-
-class ErrnoException : public std::runtime_error {
-public:
-	ErrnoException(const std::string& message) : std::runtime_error(message) {}
-};
-
-class ArgumentException : public std::invalid_argument {
-public:
-	ArgumentException(const std::string& message) : std::invalid_argument(message) {}
-};
-
-// usage helpers
-// TODO: remove these
-
-// static void print_usage_message(const std::string_view msg, std::ostream& out = std::cout) {
-// 	if (auto n = msg.length(); n > 0 && msg[n-1] == '\n') {
-// 		out << msg;
-// 	} else {
-// 		out << msg << std::endl;
-// 	}
-// }
-
 static void root_usage(std::ostream& out = std::cout)    { out << root_usage_msg; }
 static void session_usage(std::ostream& out = std::cout) { out << session_help_msg; }
 static void insert_usage(std::ostream& out = std::cout)  { out << insert_help_msg; }
@@ -181,22 +160,13 @@ static bool get_env_bool(const char *name) {
 static std::string must_getenv(const char *env_var) {
 	auto val = safe_getenv(env_var);
 	if (unlikely(val.empty())) {
-		throw ArgumentException(absl::StrCat("empty environment variable: ", env_var));
+		throw histdb::ArgumentException("empty environment variable: ", env_var);
 	}
 	return std::string(val);
 }
 
 static constexpr bool is_ascii_space(unsigned char c) {
-	switch (c) {
-	case '\t':
-	case '\n':
-	case '\v':
-	case '\f':
-	case '\r':
-	case ' ':
-		return true;
-	}
-	return false;
+	return c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r' || c == ' ';
 }
 
 static std::string trim_ascii_space(const char *s) {
@@ -204,7 +174,7 @@ static std::string trim_ascii_space(const char *s) {
 		s++;
 	};
 	if (*s) {
-		ssize_t n = std::strlen(s) - 1;
+		std::ptrdiff_t n = std::strlen(s) - 1;
 		while (n >= 0 && is_ascii_space(s[n])) {
 			n--;
 		}
@@ -233,7 +203,7 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 		case 's':
 			session = std::strtoll(optarg, nullptr, 10);
 			if (session <= 0) {
-				throw ArgumentException(absl::StrCat("non-positive session: ", session));
+				throw histdb::ArgumentException("non-positive session: ", session);
 			}
 			session_set = true;
 			break;
@@ -249,11 +219,11 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 				std::cerr << "--dry-run is not supported";
 				break;
 			default:
-				throw ArgumentException(absl::StrCat("invalid argument: ", opt_val));
+				throw histdb::ArgumentException("invalid argument: ", opt_val);
 				break;
 			}
 		default:
-			throw ArgumentException(absl::StrCat("invalid argument: ", ch));
+			throw histdb::ArgumentException("invalid argument: ", ch);
 			break;
 		}
 	}
@@ -269,27 +239,27 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 		if (!session_set) {
 			missing += " --session";
 		}
-		throw ArgumentException(missing);
+		throw histdb::ArgumentException(missing);
 	}
 
 	argc -= optind;
 	argv += optind;
 	if (argc != 1) {
 		// std::cerr << "ARG: " << argv[0] << std::endl;
-		throw ArgumentException(absl::StrCat(
+		throw histdb::ArgumentException(
 			"expected 1 argument ([HISTORY_ID RAW_COMMAND]) got: ", argc
-		));
+		);
 	}
 
 	char *p_end;
 	char *raw = argv[0];
 	history_id = std::strtoll(raw, &p_end, 10);
 	if (history_id <= 0) {
-		throw ArgumentException(absl::StrCat("non-positive: HISTORY_ID: ", history_id));
+		throw histdb::ArgumentException("non-positive: HISTORY_ID: ", history_id);
 	}
 	raw = p_end;
 	if (!raw || !*raw) {
-		throw ArgumentException("empty argument: RAW_HISTORY");
+		throw histdb::ArgumentException("empty argument: RAW_HISTORY");
 	}
 	raw_history = trim_ascii_space(raw);
 
@@ -317,7 +287,7 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 			print_eval = true;
 			break;
 		default:
-			throw ArgumentException(absl::StrCat("invalid argument: ", ch));
+			throw histdb::ArgumentException("invalid argument: ", ch);
 			break;
 		}
 	}
@@ -331,8 +301,8 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 		for (int i = 0; i < argc; i++) {
 			extra.push_back(absl::string_view(argv[i]));
 		}
-		throw ArgumentException(
-			absl::StrCat("unexpected arguments: ", absl::StrJoin(extra, ", "))
+		throw histdb::ArgumentException(
+			"unexpected arguments: ", absl::StrJoin(extra, ", ")
 		);
 	}
 }
@@ -348,7 +318,7 @@ static fs::path user_data_dir() {
 	if (!s.empty()) {
 		return fs::path(s) / ".local" / "share";
 	}
-	throw ArgumentException("neither $XDG_DATA_HOME nor $HOME are defined");
+	throw histdb::ArgumentException("neither $XDG_DATA_HOME nor $HOME are defined");
 }
 
 static fs::path histdb_database_path() {
@@ -474,7 +444,7 @@ static std::string get_boot_time() {
 	size_t size = sizeof(boot);
 
 	if (unlikely(sysctl(mib, 2, &boot, &size, nullptr, 0) != 0)) {
-		throw ErrnoException(absl::StrCat(
+		throw histdb::ErrnoException(absl::StrCat(
 			"error: ", errno, ": ", absl::NullSafeStringView(std::strerror(errno))
 		));
 	}
@@ -553,6 +523,11 @@ static int insert_command(int argc, char * const argv[]) {
 		if (print_usage) {
 			insert_usage();
 			return EXIT_SUCCESS;
+		}
+		// WARN: do we want this?
+		if (raw_history.empty()) {
+			std::cerr << "histdb: empty history entry\n";
+			return 0;
 		}
 		SQLite::Database db = open_default_database();
 		insert_history_record(db);
