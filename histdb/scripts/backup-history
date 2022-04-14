@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+TS="$(date +%s)"
+DEST="./backup/${TS}.histdb.sqlite3"
+
+if [[ -a $DEST ]]; then
+    echo >&2 "error: backup exists: $DEST"
+    exit 1
+fi
+
+sqlite3 histdb.sqlite3 .dump > "$DEST"
+zstdmt --rm -15 "$DEST"

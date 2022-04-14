@@ -5,4 +5,5 @@ set -euo pipefail
 # change to parent directory
 cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/.."
 
-exec watchman-make -p '**/*.cc' '**/*.h' -t main
+MAKE_CMD="$(type -p make)"
+exec watchman-make -p '**/*.cc' '**/*.h' --make "${MAKE_CMD} -j8" --target main

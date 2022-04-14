@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# change to parent directory
+cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/.."
+
+ALL_CHECKS=(
+    clang
+    abseil
+    bugprone
+    concurrency
+    cppcoreguidelines
+    darwin
+    google
+    llvm
+    misc
+    modernize
+    performance
+    readability
+)
+
+CHECKS=''
+for c in "${ALL_CHECKS[@]}"; do
+    CHECKS="${CHECKS}${c}-*,"
+done
+CHECKS=${CHECKS%","} # remove trailing ','
+
+exec clang-tidy --use-color --checks "${CHECKS}" src/main.cc
