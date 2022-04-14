@@ -26,7 +26,7 @@ constexpr std::string_view HISTDB_NAME = "histdb.sqlite3";
 // Options
 ////////////////////////////////////////////////////////////////////////////////
 
-static const int current_schema_migration = 1;
+static const int current_schema_migration = 2;
 
 constexpr char create_tables_stmt[] = R"""(
 BEGIN;
@@ -59,6 +59,47 @@ INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
 COMMIT;
 )""";
 
+// WARN: this is broken
+constexpr char db_migration_001[] = R"""(
+BEGIN;
+
+INSERT INTO schema_migrations (version) VALUES (2);
+
+CREATE TABLE IF NOT EXISTS boot_ids_temp (
+    id INTEGER PRIMARY KEY,
+    ts TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS boot_ids (
+    id INTEGER PRIMARY KEY
+);
+
+INSERT INTO boot_ids_temp(ts) SELECT DISTINCT(boot_time) FROM session_ids;
+
+INSERT INTO boot_ids(id) SELECT id FROM boot_ids_temp;
+
+ALTER TABLE session_ids ADD COLUMN boot_id INTEGER;
+
+UPDATE session_ids SET boot_id = boot_ids_temp.id
+    FROM boot_ids_temp
+    WHERE boot_ids_temp.ts = boot_time;
+
+CREATE TABLE IF NOT EXISTS session_ids_temp (
+    id      INTEGER PRIMARY KEY,
+    ppid    INTEGER NOT NULL,
+    boot_id TIMESTAMP NOT NULL,
+    FOREIGN KEY(boot_id) REFERENCES boot_ids(id)
+);
+
+INSERT INTO session_ids_temp(id, ppid, boot_id) SELECT id, ppid, boot_id FROM session_ids;
+
+DROP TABLE boot_ids_temp;
+DROP TABLE session_ids;
+ALTER TABLE session_ids_temp RENAME TO session_ids;
+
+COMMIT;
+)""";
+
 constexpr char insert_history_stmt[] = R"""(
 INSERT INTO history (
 	session_id,
@@ -78,6 +119,7 @@ Usage:
   histdb [command]
 
 Available Commands:
+  boot:    return a new boot id
   session: return a new session id
   insert:  insert a history entry
   info:    print information about the histdb environment
@@ -388,14 +430,16 @@ static SQLite::Database open_database(std::string& filename, bool readonly = fal
 		SQLite::OPEN_READONLY :
 		SQLite::OPEN_READWRITE|SQLite::OPEN_CREATE;
 	SQLite::Database db = SQLite::Database(filename, flags);
+	if (should_migrate_database(db)) {
+		db.exec(create_tables_stmt);
+		// FIXME: this is broken!!!
+		db.exec(db_migration_001);
+	}
 	db.exec(
 		"PRAGMA foreign_keys = 1;\n"
 		"PRAGMA journal_mode = 'PERSIST';\n"
 		"PRAGMA locking_mode = 'EXCLUSIVE';"
 	);
-	if (should_migrate_database(db)) {
-		db.exec(create_tables_stmt);
-	}
 	return db;
 }
 
@@ -526,7 +570,47 @@ static int session_id_command(int argc, char * const argv[]) {
 		SQLite::Database db = open_default_database();
 		int64_t id = new_session_id(db);
 		if (print_eval) {
-			std::cout << "export HISTDB_SESSION_ID=" << id << ";" << std::endl;
+			std::cout << "export HISTDB_SESSION_ID=" << id << ";\n" << std::endl;
+		} else {
+			std::cout << std::to_string(id) << std::endl;
+		}
+		return EXIT_SUCCESS;
+
+	} catch (const SQLite::Exception& e) {
+		int ext = e.getExtendedErrorCode();
+		if (ext >= 0) {
+			std::cerr << "sqlite: " << e.getErrorCode() << "." << ext << ": "
+				<< e.getErrorStr() << std::endl;
+		} else {
+			std::cerr << "sqlite: " << e.getErrorCode() << ": "
+				<< e.getErrorStr() << std::endl;
+		}
+	} catch (const std::exception& e) {
+		std::cerr << "error: " << e.what() << std::endl;
+	}
+	return EXIT_FAILURE;
+}
+
+static int64_t new_boot_id(SQLite::Database& db) {
+	SQLite::Statement query(
+		db, "INSERT INTO boot_ids DEFAULT VALUES;"
+	);
+	query.exec();
+	return db.getLastInsertRowid();
+}
+
+static int boot_id_command(int argc, char * const argv[]) {
+	// TODO: handle all of our exceptions
+	try {
+		parse_session_cmd_argments(argc, argv);
+		if (print_usage) {
+			session_usage();
+			return EXIT_SUCCESS;
+		}
+		SQLite::Database db = open_default_database();
+		int64_t id = new_boot_id(db);
+		if (print_eval) {
+			std::cout << "export HISTDB_BOOT_ID=" << id << ";" << std::endl;
 		} else {
 			std::cout << std::to_string(id) << std::endl;
 		}
@@ -586,6 +670,9 @@ int main(int argc, char * const argv[]) {
 
 	if (cmd == "session") {
 		return session_id_command(argc, argv);
+	}
+	if (cmd == "boot-id") {
+		return boot_id_command(argc, argv);
 	}
 	if (cmd == "insert") {
 		return insert_command(argc, argv);
