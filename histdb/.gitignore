@@ -15,17 +15,24 @@ doc
 core
 *ipch
 .settings/
+.cache
 
 CMakeCache.txt
-CMakeFiles
+/CMakeFiles*
 *.dir
 Testing
 Win32
 
-.cache
 .cmake
-Makefile
+/Makefile
 compile_commands.json
+/cmake_install.cmake
+cmake-build*/
+cmake-build-debug/
 
 /tags
 /test.sqlite*
+
+.DS_Store
+
+/main
