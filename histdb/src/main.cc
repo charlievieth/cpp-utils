@@ -23,6 +23,8 @@ namespace fs = std::filesystem;
 
 constexpr std::string_view HISTDB_NAME = "histdb.sqlite3";
 
+constexpr int32_t BUSY_TIMEOUT_MS = 300;
+
 // Options
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -388,6 +390,7 @@ static SQLite::Database open_database(std::string& filename, bool readonly = fal
 		SQLite::OPEN_READONLY :
 		SQLite::OPEN_READWRITE|SQLite::OPEN_CREATE;
 	SQLite::Database db = SQLite::Database(filename, flags);
+	db.setBusyTimeout(BUSY_TIMEOUT_MS);
 	db.exec(
 		"PRAGMA foreign_keys = 1;\n"
 		"PRAGMA journal_mode = 'PERSIST';\n"
