@@ -42,3 +42,4 @@ cmake-build-debug/
 cmake_install.cmake
 /_deps
 /third_party/SQLiteCpp/SQLiteCpp
+install_manifest.txt
