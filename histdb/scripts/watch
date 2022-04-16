@@ -6,4 +6,4 @@ set -euo pipefail
 cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/.."
 
 MAKE_CMD="$(type -p make)"
-exec watchman-make -p '**/*.cc' '**/*.h' --make "${MAKE_CMD} -j8" --target main
+exec watchman-make -p '**/*.cc' '**/*.h' --make "${MAKE_CMD} -j8" --target clean all
