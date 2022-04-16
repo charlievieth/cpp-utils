@@ -1,0 +1,10 @@
+#pragma once
+
+// Header checks
+#cmakedefine HAVE_GETOPT_H
+#cmakedefine HAVE_SQLITE3_H
+#cmakedefine HAVE_SYS_CTL_H
+#cmakedefine HAVE_SYS_TIME_H
+
+// sqlite3 functions
+#cmakedefine HAVE_SQLITE3_EXTENDED_RESULT_CODES

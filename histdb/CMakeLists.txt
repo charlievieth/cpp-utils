@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+cmake_policy(VERSION 3.12)
 
 # set the project name
 project(
 	histdb
 	VERSION 0.1
-	LANGUAGES CXX)
+        LANGUAGES C CXX)
 
 # Optionally set things like CMAKE_CXX_STANDARD, CMAKE_POSITION_INDEPENDENT_CODE here
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,109 +15,76 @@ elseif(CMAKE_CXX_STANDARD LESS 17)
 	message(WARNING "CMAKE_CXX_STANDARD has been set to '${CMAKE_CXX_STANDARD}' which is lower than the minimum required standard (c++17).")
 endif()
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+set(default_build_type "Release")
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
+    set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
+            STRING "Choose the type of build." FORCE)
+    # Set the possible values of build type for cmake-gui
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+            "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif ()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -pedantic-errors -Wshadow")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wswitch-enum -Wcast-qual -Wpointer-arith -Wunused")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstrict-overflow=5 -Wcast-align")
+set(default_install_prefix "/Users/cvieth/Projects/C++/utils/histdb/xinstall")
+if (NOT CMAKE_INSTALL_PREFIX)
+    message(STATUS "Setting install prefix to '${default_install_prefix}' as none was specified.")
+    set(CMAKE_INSTALL_PREFIX "${default_install_prefix}" CACHE
+            STRING "Choose the install prefix." FORCE)
+endif ()
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
+# Create compile commands by default
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Experimental
-#
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstring-compare")
-# GCC only
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=pure")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=const")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=noreturn")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=format")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=cold")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wsuggest-attribute=malloc")
+option(USE_SYSTEM_ABSEIL "Use the system installed version of abseil." ON)
+option(USE_SYSTEM_SQLITECPP "Use the system installed version of SqliteCpp." OFF)
 
-# Address Sanitizer
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+# Superbuild variables for sub projects
+include(ExternalProject)
+set_property(DIRECTORY PROPERTY EP_BASE ${CMAKE_BINARY_DIR}/subprojects)
+set(STAGED_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/stage)
+set(DEPENDENCIES_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/subprojects/Install)
+# set(DEPENDENCIES_SOURCE_PREFIX ${CMAKE_BINARY_DIR}/subprojects/Source)
+include(GNUInstallDirs)
 
-# get_filename_component(third_party_dir "./third_party" ABSOLUTE)
+# Verify or install dependencies
+add_subdirectory(third_party)
+# add_subdirectory(${DEPENDENCIES_SOURCE_PREFIX}/sqlitecpp_dependency)
 
-# main
-add_executable(main src/main.cc)
+# Build the project itself
+ExternalProject_Add(HistdbSource
+        SOURCE_DIR
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        DEPENDS
+            absl_dependency
+            # sqlitecpp_dependency
+        CMAKE_ARGS
+            -DPKG_CONFIG_EXECUTABLE:PATH=${PKG_CONFIG_EXECUTABLE}
+        CMAKE_CACHE_ARGS
+            -DCMAKE_PROJECT_VERSION:STRING=${CMAKE_PROJECT_VERSION}
+            -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+            -DCMAKE_TOOLCHAIN_FILE:PATH=${CMAKE_TOOLCHAIN_FILE}
+            -DCMAKE_FIND_ROOT_PATH:PATH=${CMAKE_FIND_ROOT_PATH}
+            -DCMAKE_IGNORE_PATH:PATH=${CMAKE_IGNORE_PATH}
+            -DCMAKE_SYSROOT:PATH=${CMAKE_SYSROOT}
+            -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
+            -DCMAKE_C_COMPILER_TARGET:STRING=${CMAKE_C_COMPILER_TARGET}
+            -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
+            -DCMAKE_CXX_COMPILER_TARGET:STRING=${CMAKE_CXX_COMPILER_TARGET}
+            -DCMAKE_CXX_STANDARD:STRING=${CMAKE_CXX_STANDARD}
+            -DCMAKE_CXX_STANDARD_REQUIRED:BOOL=${CMAKE_CXX_STANDARD_REQUIRED}
+            -DCMAKE_CXX_EXTENSIONS:BOOL=${CMAKE_CXX_EXTENSIONS}
+            -DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}
+            -DCMAKE_PREFIX_PATH:PATH=${CMAKE_PREFIX_PATH}
+            -DCMAKE_INSTALL_PREFIX:PATH=${STAGED_INSTALL_PREFIX}
+            -DCMAKE_INSTALL_LIBDIR:PATH=${CMAKE_INSTALL_LIBDIR}
+            -DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
+            -DROOT_INSTALL_PREFIX:PATH=${CMAKE_INSTALL_PREFIX}
+        )
 
-# SQLiteCpp
-set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "" FORCE)
-set(SQLITECPP_RUN_CPPLINT OFF CACHE BOOL "" FORCE)
-set(SQLITECPP_USE_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/SQLiteCpp)
-target_link_libraries(main SQLiteCpp)
-
-# abseil-cpp
-set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/abseil-cpp)
-target_link_libraries(main absl::strings)
-
-
-# target_link_libraries(main
-# 	sqlite3
-# 	SQLiteCpp
-# 	pthread
-# 	dl)
-
-
-# include(ExternalProject)
-# ExternalProject_Add(SQLiteCpp
-# 	PREFIX SQLiteCpp
-# 	SOURCE_DIR "${third_party_dir}"
-# 	GIT_REPOSITORY "https://github.com/SRombauts/SQLiteCpp.git"
-# 	GIT_TAG "3.1.1"
-#     CMAKE_CACHE_ARGS "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
-# 					 ${ARGN})
-# add_dependencies(histdb, SQLiteCpp)
-
-# set(ABSL_PROPAGATE_CXX_STD ON)
-# add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/third_party/abseil-cpp)
-
-# # Let's ensure -std=c++xx instead of -std=g++xx
-# # set(CMAKE_CXX_EXTENSIONS OFF)
-
-# # Let's nicely support folders in IDEs
-# # set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
-# # Testing only available if this is the main app
-# # Note this needs to be done in the main CMakeLists
-# # since it calls enable_testing, which must be in the
-# # main CMakeLists.
-# # include(CTest)
-
-# find_package(SQLite3 REQUIRED)
-
-# # TODO: use pkg-config
-# # if(EXISTS "/usr/local/opt/sqlite/lib/pkgconfig")
-# # 	message("ok")
-# # 	set(ENV{PKG_CONFIG_PATH} "/usr/local/opt/sqlite/lib/pkgconfig")
-# # 	find_package(PkgConfig REQUIRED)
-# # 	pkg_check_modules(SQLite3 REQUIRED)
-# # else()
-# # endif()
-
-# # target_link_libraries(SQLiteCpp PUBLIC SQLite::SQLite3)
-
-# # This is a "default" library, and will match the *** variable setting.
-# # Other common choices are STATIC, SHARED, and MODULE
-# # Including header files here helps IDEs but is not required.
-# # Output libname matches target name, with the usual extensions on your system
-# add_library(SQLiteCpp sqlite3_db.cc sqlite3_db.hh)
-
-# # Link each target with other targets or add options, etc.
-
-# # Adding something we can run - Output name matches target name
-# add_executable(histdb main.cc)
-
-# # Make sure you link your targets with this command. It can also link libraries and
-# # even flags, so linking a target that does not exist will not give a configure-time error.
-# target_link_libraries(histdb PRIVATE SQLiteCpp)
-
-# # # The compiled library code is here
-# # add_subdirectory(src)
-
-# # # The executable code is here
-# # add_subdirectory(apps)
+# Install the project artifacts from the staged directory
+include(GNUInstallDirs)
+install(DIRECTORY
+            ${STAGED_INSTALL_PREFIX}/
+        DESTINATION
+            .
+)

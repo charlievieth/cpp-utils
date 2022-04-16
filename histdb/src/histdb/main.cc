@@ -6,16 +6,19 @@
 #include <cerrno>
 
 #include <filesystem>
+#include <utility>
 namespace fs = std::filesystem;
 
 #include <sys/sysctl.h> // sysctl (for boot time)
 #include <sys/time.h>   // timeval
 #include <getopt.h>     // getopt_long
 
-#include <SQLiteCpp/Database.h>
 #include "absl/strings/string_view.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include <SQLiteCpp/Database.h>
+
+#include <sqlite3.h>
 
 // TODO: use or remove
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -109,6 +112,22 @@ Flags:
     -e, --eval    print the session id as a statment that can be evaluated by bash
     -h, --help    help for insert
 )""";
+
+// Error handling
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef SQLITECPP_ENABLE_ASSERT_HANDLER
+namespace SQLite
+{
+// definition of the assertion handler enabled when SQLITECPP_ENABLE_ASSERT_HANDLER is defined in the project (CMakeList.txt)
+void assertion_failed(const char* apFile, const long apLine, const char* apFunc,
+					  const char* apExpr, const char* apMsg) {
+    // Print a message to the standard error output stream, and abort the program.
+    std::cerr << apFile << ":" << apLine << ":" << " error: assertion failed (" << apExpr << ") in " << apFunc << "() with message \"" << apMsg << "\"\n";
+    std::abort();
+}
+} /* SQLite */
+#endif /* SQLITECPP_ENABLE_ASSERT_HANDLER */
 
 // insert command options
 
@@ -386,10 +405,16 @@ static bool should_migrate_database(SQLite::Database& db) {
 }
 
 static SQLite::Database open_database(std::string& filename, bool readonly = false) {
-	int flags = readonly ?
+	// TODO: set SQLITE_OPEN_EXRESCODE (if defined)
+	const int flags = readonly ?
 		SQLite::OPEN_READONLY :
 		SQLite::OPEN_READWRITE|SQLite::OPEN_CREATE;
+
 	SQLite::Database db = SQLite::Database(filename, flags);
+
+	// Enable extended error codes
+	sqlite3_extended_result_codes(db.getHandle(), 1);
+
 	db.setBusyTimeout(BUSY_TIMEOUT_MS);
 	db.exec(
 		"PRAGMA foreign_keys = 1;\n"
@@ -405,10 +430,12 @@ static SQLite::Database open_database(std::string& filename, bool readonly = fal
 static SQLite::Database open_default_database(bool readonly = false) {
 	auto name = fs::path(histdb_database_path());
 	if (!fs::exists(name)) {
-		fs::create_directories(fs::path(name).remove_filename());
+		if (name.has_parent_path()) {
+			fs::create_directories(name.remove_filename());
+		}
 	}
-	auto s = name.string();
-	return open_database(s, readonly);
+	auto sname = name.string();
+	return open_database(sname, readonly);
 }
 
 // code_us_fraction encodes microsecond fraction us into char p. The behavior
@@ -533,6 +560,7 @@ static int session_id_command(int argc, char * const argv[]) {
 		} else {
 			std::cout << std::to_string(id) << std::endl;
 		}
+		db.backup(db.getFilename().data(), SQLite::Database::Save);
 		return EXIT_SUCCESS;
 
 	} catch (const SQLite::Exception& e) {

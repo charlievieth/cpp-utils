@@ -18,13 +18,13 @@ core
 .cache
 
 CMakeCache.txt
-/CMakeFiles*
+CMakeFiles*
 *.dir
 Testing
 Win32
 
 .cmake
-/Makefile
+Makefile
 compile_commands.json
 /cmake_install.cmake
 cmake-build*/
@@ -36,3 +36,9 @@ cmake-build-debug/
 .DS_Store
 
 /main
+/subprojects
+/stage
+/histdb
+cmake_install.cmake
+/_deps
+/third_party/SQLiteCpp/SQLiteCpp
