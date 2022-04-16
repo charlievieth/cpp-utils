@@ -1,3 +1,4 @@
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -24,6 +25,7 @@ namespace fs = std::filesystem;
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
+constexpr const char *HISTDB_PROD = "HISTDB_PROD";
 constexpr std::string_view HISTDB_NAME = "histdb.sqlite3";
 
 constexpr int32_t BUSY_TIMEOUT_MS = 300;
@@ -207,6 +209,15 @@ static std::string must_getenv(const char *env_var) {
 	return std::string(val);
 }
 
+static bool FORCE_USE_PROD_DATABASE = false;
+
+static bool use_test_database() {
+	if (FORCE_USE_PROD_DATABASE) {
+		return false;
+	}
+	return get_env_bool(HISTDB_PROD) == false;
+}
+
 static constexpr bool is_ascii_space(unsigned char c) {
 	switch (c) {
 	case '\t':
@@ -375,7 +386,9 @@ static fs::path user_data_dir() {
 static fs::path histdb_database_path() {
 	// Pedantically guard against writing to the real database.
 	// TODO: Remove this once testing is done.
-	if (!get_env_bool("HISTDB_PROD")) {
+
+	// if (!get_env_bool(HISTDB_PROD)) {
+	if (use_test_database()) {
 		return "test.sqlite3";
 	}
 	return user_data_dir() / "histdb" / "data" / HISTDB_NAME;
@@ -604,6 +617,46 @@ static int insert_command(int argc, char * const argv[]) {
 	return EXIT_FAILURE;
 }
 
+static int db_dump_info() {
+	auto dump = [](std::string name) {
+		std::cout << name << ":" << std::endl;
+		auto dbname = histdb_database_path();
+		if (!fs::exists(dbname)) {
+			std::cout << "  NONE" << std::endl;
+			return;
+		}
+		auto db = open_default_database(true);
+		auto is_prod = FORCE_USE_PROD_DATABASE || get_env_bool(HISTDB_PROD);
+		std::cout << "  prod:        " << (is_prod ? "true" : "false") << std::endl;
+		std::cout << "  database:    " << histdb_database_path() << std::endl;
+		std::string last_ts;
+		std::string last_cmd;
+		int64_t rows = 0;
+		try {
+			SQLite::Statement query(
+				db, "SELECT created_at, raw FROM history order BY id DESC LIMIT 1;"
+			);
+			if (!query.executeStep()) {
+				return;
+			}
+			last_ts = query.getColumn(0).getString();
+			last_cmd = query.getColumn(1).getString();
+			rows = db.execAndGet("SELECT COUNT(*) FROM history;").getInt64();
+		} catch (const std::exception& e) {
+			last_ts = "NONE";
+			last_cmd = "NONE";
+		}
+		std::cout << "  count:       " << rows << std::endl;
+		std::cout << "  last_cmd:    `" << last_cmd << "`" << std::endl;
+		std::cout << "  last_insert: " << last_ts << std::endl;
+	};
+
+	dump("TEST");
+	FORCE_USE_PROD_DATABASE = true;
+	dump("PROD");
+	return 0;
+}
+
 int main(int argc, char * const argv[]) {
 	if (argc <= 1) {
 		root_usage(std::cerr);
@@ -623,8 +676,7 @@ int main(int argc, char * const argv[]) {
 	}
 	// TODO: document this
 	if (cmd == "info") {
-		std::cout << "database: " << histdb_database_path() << std::endl;
-		return 0;
+		return db_dump_info();
 	}
 	if (cmd == "-h" || cmd == "--help") {
 		root_usage();
