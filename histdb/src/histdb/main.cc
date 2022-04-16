@@ -5,6 +5,7 @@
 #include <ctime>
 #include <chrono>
 #include <cerrno>
+#include <stdexcept>
 
 #include <filesystem>
 #include <utility>
@@ -33,9 +34,9 @@ constexpr int32_t BUSY_TIMEOUT_MS = 300;
 // Options
 ////////////////////////////////////////////////////////////////////////////////
 
-static const int current_schema_migration = 1;
+static const int current_schema_migration = 2;
 
-constexpr char create_tables_stmt[] = R"""(
+constexpr char m001_create_tables_stmt[] = R"""(
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS session_ids (
@@ -64,6 +65,16 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 INSERT OR IGNORE INTO schema_migrations (version) VALUES (1);
 
 COMMIT;
+)""";
+
+constexpr char m002_create_boot_id_table[] = R"""(
+BEGIN;
+CREATE TABLE IF NOT EXISTS boot_ids (
+    id         INTEGER PRIMARY KEY,
+    created_at TIMESTAMP NOT NULL
+);
+COMMIT;
+INSERT OR IGNORE INTO schema_migrations (version) VALUES (2);
 )""";
 
 constexpr char insert_history_stmt[] = R"""(
@@ -115,6 +126,16 @@ Flags:
     -h, --help    help for insert
 )""";
 
+constexpr std::string_view boot_id_help_msg = R"""(initiate a new histdb boot id
+
+Usage:
+  histdb boot-id [flags]
+
+Flags:
+    -e, --eval    print the session id as a statment that can be evaluated by bash
+    -h, --help    help for insert
+)""";
+
 // Error handling
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -157,9 +178,10 @@ static const struct option insert_cmd_opts[] = {
 
 static bool print_eval = false;
 static const struct option session_cmd_opts[] = {
-	{"help",  no_argument, nullptr, 'h'},
-	{"eval",  no_argument, nullptr, 'e'}, // print evalable output
-	{nullptr, 0,           nullptr, 0},   // zero pad end
+	{"boot-id", required_argument, nullptr, 'b'},
+	{"help",    no_argument,       nullptr, 'h'},
+	{"eval",    no_argument,       nullptr, 'e'}, // print evalable output
+	{nullptr,   0,                 nullptr, 0},   // zero pad end
 };
 
 // expections (TODO: move to separate file)
@@ -187,6 +209,7 @@ public:
 
 static void root_usage(std::ostream& out = std::cout)    { out << root_usage_msg; }
 static void session_usage(std::ostream& out = std::cout) { out << session_help_msg; }
+static void boot_id_usage(std::ostream& out = std::cout) { out << boot_id_help_msg; }
 static void insert_usage(std::ostream& out = std::cout)  { out << insert_help_msg; }
 
 // parse helpers
@@ -195,10 +218,19 @@ static std::string_view safe_getenv(const char *name) {
 	return absl::NullSafeStringView(std::getenv(name));
 }
 
+static constexpr bool parse_bool(std::string_view s) {
+	if (s == "1" || s == "t" || s == "T" || s == "true" || s == "True" || s == "TRUE") {
+		return true;
+	}
+	if (s == "0" || s == "f" || s == "F" || s == "false" || s == "False" || s == "FALSE") {
+		return false;
+	}
+	throw ArgumentException(absl::StrCat("parse_bool: invalid argument: '", s, "'"));
+}
+
 static bool get_env_bool(const char *name) {
-	auto s = safe_getenv(name);
-	return static_cast<bool>(s == "1" || s == "t" || s == "T" || s == "true" ||
-		s == "True" || s == "TRUE");
+	auto val = safe_getenv(name);
+	return !val.empty() && parse_bool(val);
 }
 
 static std::string must_getenv(const char *env_var) {
@@ -246,6 +278,17 @@ static std::string trim_ascii_space(const char *s) {
 }
 
 // command line parsers
+
+static bool require_int(const char *s) {
+	const unsigned char *p = (const unsigned char *)s;
+	unsigned char c;
+	while ((c = *p++)) {
+		if (!('0' <= c && c <= '9')) {
+			return false;
+		}
+	}
+	return true;
+}
 
 static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 	int ch;
@@ -369,6 +412,10 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 	}
 }
 
+static void parse_boot_id_cmd_argments(int argc, char * const argv[]) {
+	parse_session_cmd_argments(argc, argv);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static fs::path user_data_dir() {
@@ -386,8 +433,6 @@ static fs::path user_data_dir() {
 static fs::path histdb_database_path() {
 	// Pedantically guard against writing to the real database.
 	// TODO: Remove this once testing is done.
-
-	// if (!get_env_bool(HISTDB_PROD)) {
 	if (use_test_database()) {
 		return "test.sqlite3";
 	}
@@ -435,7 +480,8 @@ static SQLite::Database open_database(std::string& filename, bool readonly = fal
 		"PRAGMA locking_mode = 'EXCLUSIVE';"
 	);
 	if (should_migrate_database(db)) {
-		db.exec(create_tables_stmt);
+		db.exec(m001_create_tables_stmt);
+		db.exec(m002_create_boot_id_table);
 	}
 	return db;
 }
@@ -591,6 +637,49 @@ static int session_id_command(int argc, char * const argv[]) {
 	return EXIT_FAILURE;
 }
 
+static int64_t new_boot_id(SQLite::Database& db) {
+	auto ts = format_time(std::chrono::system_clock::now());
+	SQLite::Statement query(
+		db, "INSERT INTO boot_ids (created_at) VALUES (?);"
+	);
+	query.bind(1, ts);
+	query.exec();
+	return db.getLastInsertRowid();
+}
+
+static int boot_id_command(int argc, char * const argv[]) {
+	// TODO: handle all of our exceptions
+	try {
+		parse_boot_id_cmd_argments(argc, argv);
+		if (print_usage) {
+			boot_id_usage();
+			return EXIT_SUCCESS;
+		}
+		SQLite::Database db = open_default_database();
+		int64_t id = new_boot_id(db);
+		if (print_eval) {
+			std::cout << "export HISTDB_SESSION_ID=" << id << ";" << std::endl;
+		} else {
+			std::cout << std::to_string(id) << std::endl;
+		}
+		db.backup(db.getFilename().data(), SQLite::Database::Save);
+		return EXIT_SUCCESS;
+
+	} catch (const SQLite::Exception& e) {
+		int ext = e.getExtendedErrorCode();
+		if (ext >= 0) {
+			std::cerr << "sqlite: " << e.getErrorCode() << "." << ext << ": "
+				<< e.getErrorStr() << std::endl;
+		} else {
+			std::cerr << "sqlite: " << e.getErrorCode() << ": "
+				<< e.getErrorStr() << std::endl;
+		}
+	} catch (const std::exception& e) {
+		std::cerr << "error: " << e.what() << std::endl;
+	}
+	return EXIT_FAILURE;
+}
+
 static int insert_command(int argc, char * const argv[]) {
 	try {
 		parse_insert_cmd_argments(argc, argv);
@@ -673,6 +762,9 @@ int main(int argc, char * const argv[]) {
 	}
 	if (cmd == "insert") {
 		return insert_command(argc, argv);
+	}
+	if (cmd == "boot-id") {
+		return boot_id_command(argc, argv);
 	}
 	// TODO: document this
 	if (cmd == "info") {
