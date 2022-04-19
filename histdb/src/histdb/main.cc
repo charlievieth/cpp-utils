@@ -15,7 +15,6 @@ namespace fs = std::filesystem;
 #include <sys/time.h>   // timeval
 #include <getopt.h>     // getopt_long
 
-#include "absl/strings/string_view.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include <SQLiteCpp/Database.h>
@@ -279,8 +278,11 @@ static std::string trim_ascii_space(const char *s) {
 
 // command line parsers
 
-static bool require_int(const char *s) {
+static bool chars_are_numeric(const char *s) {
 	const unsigned char *p = (const unsigned char *)s;
+	if (!p || *p == '\0') {
+		return false;
+	}
 	unsigned char c;
 	while ((c = *p++)) {
 		if (!('0' <= c && c <= '9')) {
@@ -299,13 +301,18 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 		switch (ch) {
 		case 'd':
 			// WARN: not supported
-			std::cerr << "--debug is not supported";
+			std::cerr << "WARN: --debug is not supported" << std::endl;
 			debug = true;
 			break;
 		case 'h':
 			print_usage = true;
 			break;
 		case 's':
+			if (!chars_are_numeric(optarg)) {
+				throw ArgumentException(absl::StrCat(
+					"session id must be an iteger: '", optarg, "'"
+				));
+			}
 			session = std::strtoll(optarg, nullptr, 10);
 			if (session <= 0) {
 				throw ArgumentException(absl::StrCat("non-positive session: ", session));
@@ -314,6 +321,11 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 			break;
 		case 'c':
 			// TODO: check for any exceptions
+			if (!chars_are_numeric(optarg)) {
+				throw ArgumentException(absl::StrCat(
+					"session-code must be an iteger: '", optarg, "'"
+				));
+			}
 			status_code = std::stoi(optarg, nullptr, 10);
 			status_set = true;
 			break;
@@ -402,9 +414,9 @@ static void parse_session_cmd_argments(int argc, char * const argv[]) {
 	argc -= optind;
 	argv += optind;
 	if (argc != 0) {
-		std::vector<absl::string_view> extra;
+		std::vector<std::string_view> extra;
 		for (int i = 0; i < argc; i++) {
-			extra.push_back(absl::string_view(argv[i]));
+			extra.push_back(std::string_view(argv[i]));
 		}
 		throw ArgumentException(
 			absl::StrCat("unexpected arguments: ", absl::StrJoin(extra, ", "))
