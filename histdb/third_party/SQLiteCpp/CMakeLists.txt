@@ -1,39 +1,42 @@
 
-message(STATUS "Looking for sqlite3 dependency")
-if (NOT DEFINED ENV{PKG_CONFIG_PATH})
-    get_filename_component(sqlite_pkgconfig_opt "/opt/homebrew/opt/sqlite/lib/pkgconfig" REALPATH)
-    get_filename_component(sqlite_pkgconfig_local "/usr/local/opt/sqlite/lib/pkgconfig" REALPATH)
-    if (EXISTS "${sqlite_pkgconfig_opt}")
-        message(STATUS "Found sqlite3 pkgconfig: opt")
-        set(ENV{PKG_CONFIG_PATH} "${sqlite_pkgconfig_opt}")
-    elseif (EXISTS "${sqlite_pkgconfig_local}")
-        message(STATUS "Found sqlite3: pkgconfig: local")
-        set(ENV{PKG_CONFIG_PATH} "${sqlite_pkgconfig_local}")
-    else ()
-        message(STATUS "Missing sqlite3 pkgconfig")
-    endif ()
-    find_package (SQLite3 REQUIRED)
-endif ()
+# message(STATUS "Looking for sqlite3 dependency")
+# if (NOT DEFINED ENV{PKG_CONFIG_PATH})
+#     get_filename_component(sqlite_pkgconfig_opt "/opt/homebrew/opt/sqlite/lib/pkgconfig" REALPATH)
+#     get_filename_component(sqlite_pkgconfig_local "/usr/local/opt/sqlite/lib/pkgconfig" REALPATH)
+#     if (EXISTS "${sqlite_pkgconfig_opt}")
+#         message(STATUS "Found sqlite3 pkgconfig: opt")
+#         set(ENV{PKG_CONFIG_PATH} "${sqlite_pkgconfig_opt}")
+#     elseif (EXISTS "${sqlite_pkgconfig_local}")
+#         message(STATUS "Found sqlite3: pkgconfig: local")
+#         set(ENV{PKG_CONFIG_PATH} "${sqlite_pkgconfig_local}")
+#     else ()
+#         message(STATUS "Missing sqlite3 pkgconfig")
+#     endif ()
+#     find_package (SQLite3 REQUIRED)
+# endif ()
 
+# NOTE: we are using a fork of SqliteCpp:
+# https://github.com/charlievieth/SQLiteCpp/releases/tag/v3.38.2
 message(STATUS "Looking for SQLiteCpp dependency")
 find_package(PkgConfig REQUIRED)
 if (USE_SYSTEM_SQLITECPP)
-    find_package(SQLiteCpp 3.1.1 REQUIRED)
+    find_package(SQLiteCpp 3.38.2 REQUIRED)
 else ()
-    find_package(SQLiteCpp 3.1.1 QUIET CONFIG)
+    find_package(SQLiteCpp 3.38.2 QUIET CONFIG)
 endif ()
+
 if (SQLiteCpp_FOUND)
     message(STATUS "Looking for SQLiteCpp dependency -- found")
     add_custom_target(sqlitecpp_dependency)
 else ()
     message(STATUS "Looking for SQLiteCpp dependency -- not found")
 
-    include(FetchContent)
-    FetchContent_Declare(sqlitecpp_dependency
+    include(ExternalProject)
+    ExternalProject_Add(sqlitecpp_dependency
         URL
-            https://github.com/SRombauts/SQLiteCpp/archive/refs/tags/3.1.1.tar.gz
+            https://github.com/charlievieth/SQLiteCpp/archive/refs/tags/v3.38.2.tar.gz
         URL_HASH
-            SHA256=b00b1efad985dd415c3b62b01252cae20d9f2c32dcac435ddd8a105e9d4ddcde
+            SHA256=235ea9bcace287916d6f4b07f4912b843d17677d0565f4cbf82590482bf9e0ff
         DOWNLOAD_NO_PROGRESS
             1
         UPDATE_COMMAND
@@ -44,13 +47,13 @@ else ()
             1
         LOG_INSTALL
             1
-        CMAKE_ARGS
-            # TODO: link to the installed version of sqlite
-            -DSQLITECPP_INTERNAL_SQLITE:BOOL=OFF
-            -DSQLITECPP_RUN_CPPCHECK:BOOL=OFF
+        # CMAKE_ARGS
+        #     # TODO: link to the installed version of sqlite
+        #     -DSQLITECPP_INTERNAL_SQLITE:BOOL=OFF
+        #     -DSQLITECPP_RUN_CPPCHECK:BOOL=OFF
         CMAKE_CACHE_ARGS
             # TODO: link to the installed version of sqlite
-            -DSQLITECPP_INTERNAL_SQLITE:BOOL=OFF
+            # -DSQLITECPP_INTERNAL_SQLITE:BOOL=OFF
             # Enable assertion handler
             -DSQLITECPP_ENABLE_ASSERT_HANDLER:BOOL=ON
             -DSQLITECPP_RUN_CPPCHECK:BOOL=OFF
@@ -60,33 +63,11 @@ else ()
             -DSQLITECPP_BUILD_TESTS:BOOL=OFF
             -DCMAKE_PREFIX_PATH:PATH=${CMAKE_PREFIX_PATH}
             -DCMAKE_INSTALL_PREFIX:PATH=${DEPENDENCIES_INSTALL_PREFIX}/sqlitecpp_dependency
-        # SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/SQLiteCpp
     )
-    message(WARNING "DEPENDENCIES_INSTALL_PREFIX: ${DEPENDENCIES_INSTALL_PREFIX}")
-
-    # FetchContent_GetProperties(sqlitecpp_dependency)
-    # if (NOT sqlitecpp_dependency_POPULATED)
-    #     FetchContent_Populate(sqlitecpp_dependency)
-    #     set(SQLITECPP_INTERNAL_SQLITE OFF)
-    # endif()
-    # add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/SQLiteCpp")
-
-    # add_subdirectory(SQLiteCpp)
-    # add_subdirectory(sqlitecpp_dependency)
-
-    FetchContent_MakeAvailable(sqlitecpp_dependency)
-    # add_custom_target(sqlitecpp_dependency)
-
-    # Verify or install dependencies
     include(GNUInstallDirs)
-    # list(APPEND PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/SQLiteCpp")
-    # set(CMAKE_PREFIX_PATH ${PREFIX_PATH};${CMAKE_PREFIX_PATH}
-    #     CACHE PATH "append sqlitecpp library into the search path"
-    #         FORCE)
-
-    # WARN
     list(APPEND PREFIX_PATH "${DEPENDENCIES_INSTALL_PREFIX}/sqlitecpp_dependency")
     set(CMAKE_PREFIX_PATH ${PREFIX_PATH};${CMAKE_PREFIX_PATH}
         CACHE PATH "append sqlitecpp library into the search path"
             FORCE)
+    message(STATUS "Found SqliteCpp dependency")
 endif ()

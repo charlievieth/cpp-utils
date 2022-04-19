@@ -43,7 +43,7 @@ include(ExternalProject)
 set_property(DIRECTORY PROPERTY EP_BASE ${CMAKE_BINARY_DIR}/subprojects)
 set(STAGED_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/stage)
 set(DEPENDENCIES_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/subprojects/Install)
-# set(DEPENDENCIES_SOURCE_PREFIX ${CMAKE_BINARY_DIR}/subprojects/Source)
+set(DEPENDENCIES_SOURCE_PREFIX ${CMAKE_BINARY_DIR}/subprojects/Source)
 include(GNUInstallDirs)
 
 # Verify or install dependencies
@@ -56,7 +56,7 @@ ExternalProject_Add(HistdbSource
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         DEPENDS
             absl_dependency
-            # sqlitecpp_dependency
+            sqlitecpp_dependency
         CMAKE_ARGS
             -DPKG_CONFIG_EXECUTABLE:PATH=${PKG_CONFIG_EXECUTABLE}
         CMAKE_CACHE_ARGS

@@ -1,7 +1,5 @@
 # Create an executable from the sub projects.
-add_executable(histdb
-        main.cc
-		)
+add_executable(histdb main.cc)
 
 target_link_libraries(histdb
 	absl::base
