@@ -631,7 +631,6 @@ static int session_id_command(int argc, char * const argv[]) {
 		} else {
 			std::cout << std::to_string(id) << std::endl;
 		}
-		db.backup(db.getFilename().data(), SQLite::Database::Save);
 		return EXIT_SUCCESS;
 
 	} catch (const SQLite::Exception& e) {
@@ -674,7 +673,6 @@ static int boot_id_command(int argc, char * const argv[]) {
 		} else {
 			std::cout << std::to_string(id) << std::endl;
 		}
-		db.backup(db.getFilename().data(), SQLite::Database::Save);
 		return EXIT_SUCCESS;
 
 	} catch (const SQLite::Exception& e) {
