@@ -428,6 +428,10 @@ static void parse_boot_id_cmd_argments(int argc, char * const argv[]) {
 	parse_session_cmd_argments(argc, argv);
 }
 
+static void parse_dump_history_cmd_argments(int argc, char * const argv[]) {
+	parse_session_cmd_argments(argc, argv);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static fs::path user_data_dir() {
@@ -485,6 +489,12 @@ static SQLite::Database open_database(std::string& filename, bool readonly = fal
 	// Enable extended error codes
 	sqlite3_extended_result_codes(db.getHandle(), 1);
 
+	// TODO: increase `PRAGMA main.cache_size;` for queries (-8000 is ~7.8mb)
+	// TODO: use a 'PENDING' lock for writing and a 'SHARED' lock for read-only
+	//
+	// TODO: look into using journal_mode = 'WAL' (https://sqlite.org/wal.html)
+	// since it is more performant and is supported by Unix and Windows systems.
+	// CEV: This only helps a little and does create 2 new files
 	db.setBusyTimeout(BUSY_TIMEOUT_MS);
 	db.exec(
 		"PRAGMA foreign_keys = 1;\n"
@@ -589,7 +599,9 @@ static std::string get_boot_time() {
 	);
 }
 
-// TODO: pass in the raw history and trim whitespace
+// TODO:
+//	* don't allow control chars
+//	* pass in the raw history and trim whitespace
 static void insert_history_record(SQLite::Database& db) {
 	auto ts = format_time(std::chrono::system_clock::now());
 	auto ppid = getppid();
@@ -672,6 +684,61 @@ static int boot_id_command(int argc, char * const argv[]) {
 			std::cout << "export HISTDB_SESSION_ID=" << id << ";" << std::endl;
 		} else {
 			std::cout << std::to_string(id) << std::endl;
+		}
+		return EXIT_SUCCESS;
+
+	} catch (const SQLite::Exception& e) {
+		int ext = e.getExtendedErrorCode();
+		if (ext >= 0) {
+			std::cerr << "sqlite: " << e.getErrorCode() << "." << ext << ": "
+				<< e.getErrorStr() << std::endl;
+		} else {
+			std::cerr << "sqlite: " << e.getErrorCode() << ": "
+				<< e.getErrorStr() << std::endl;
+		}
+	} catch (const std::exception& e) {
+		std::cerr << "error: " << e.what() << std::endl;
+	}
+	return EXIT_FAILURE;
+}
+
+// TODO: consider removing this once we restructure the code
+static int dump_history_command(int argc, char * const argv[]) {
+	// TODO: handle all of our exceptions
+	try {
+		parse_dump_history_cmd_argments(argc, argv);
+		if (print_usage) {
+			boot_id_usage();
+			return EXIT_SUCCESS;
+		}
+		SQLite::Database db = open_default_database(true);
+
+		SQLite::Statement query(
+			db, "SELECT raw FROM history;"
+		);
+
+		// TODO: support line buffering.
+		// Using a buffer here is ~3x faster.
+		auto buf = std::string();
+		buf.reserve(96 * 1024);
+		while (query.executeStep()) {
+			auto raw = absl::NullSafeStringView(query.getColumn(0).getText());
+			if (raw.length() >= buf.capacity()) {
+				if (buf.length() > 0) {
+					std::cout << buf;
+					buf.clear();
+				}
+				if (raw.length() >= 96 * 1024) {
+					// Large string - write directly
+					std::cout << raw << std::endl;
+				}
+			} else {
+				buf.append(raw);
+				buf.push_back('\n');
+			}
+		}
+		if (buf.length() > 0) {
+			std::cout << buf;
 		}
 		return EXIT_SUCCESS;
 
@@ -775,6 +842,9 @@ int main(int argc, char * const argv[]) {
 	}
 	if (cmd == "boot-id") {
 		return boot_id_command(argc, argv);
+	}
+	if (cmd == "dump") {
+		return dump_history_command(argc, argv);
 	}
 	// TODO: document this
 	if (cmd == "info") {
