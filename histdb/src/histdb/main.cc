@@ -19,6 +19,10 @@ namespace fs = std::filesystem;
 #include "absl/strings/str_join.h"
 #include <SQLiteCpp/Database.h>
 
+// WARN
+#include <CLI/CLI.hpp>
+#include <CLI/App.hpp>
+
 #include <sqlite3.h>
 
 // TODO: use or remove
@@ -153,11 +157,14 @@ void assertion_failed(const char* apFile, const long apLine, const char* apFunc,
 
 // insert command options
 
-static bool debug = false;
+static bool verbose = false;
+// TODO: use this
+static bool FORCE_USE_PROD_DATABASE = false;
+static bool use_prod_database = false;
 static bool print_usage = false;
 static bool dry_run = false;
 static int status_code = 0;
-static long long session = 0;
+static long long session_id = 0;
 static long long history_id = 0;
 static std::string raw_history;
 static std::string current_wd;
@@ -240,8 +247,6 @@ static std::string must_getenv(const char *env_var) {
 	return std::string(val);
 }
 
-static bool FORCE_USE_PROD_DATABASE = false;
-
 static bool use_test_database() {
 	if (FORCE_USE_PROD_DATABASE) {
 		return false;
@@ -302,7 +307,7 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 		case 'd':
 			// WARN: not supported
 			std::cerr << "WARN: --debug is not supported" << std::endl;
-			debug = true;
+			verbose = true;
 			break;
 		case 'h':
 			print_usage = true;
@@ -313,9 +318,9 @@ static void parse_insert_cmd_argments(int argc, char * const argv[]) {
 					"session id must be an iteger: '", optarg, "'"
 				));
 			}
-			session = std::strtoll(optarg, nullptr, 10);
-			if (session <= 0) {
-				throw ArgumentException(absl::StrCat("non-positive session: ", session));
+			session_id = std::strtoll(optarg, nullptr, 10);
+			if (session_id <= 0) {
+				throw ArgumentException(absl::StrCat("non-positive session: ", session_id));
 			}
 			session_set = true;
 			break;
@@ -606,7 +611,7 @@ static void insert_history_record(SQLite::Database& db) {
 	auto ts = format_time(std::chrono::system_clock::now());
 	auto ppid = getppid();
 	SQLite::Statement query(db, insert_history_stmt);
-	query.bind(1, session);
+	query.bind(1, session_id);
 	query.bind(2, history_id);
 	// TODO: don't need this if it's part of the session_ids table
 	query.bind(3, ppid);
@@ -823,7 +828,145 @@ static int db_dump_info() {
 	return 0;
 }
 
+// static void insert_history_record(SQLite::Database& db) {
+// 	auto ts = format_time(std::chrono::system_clock::now());
+// 	auto ppid = getppid();
+// 	SQLite::Statement query(db, insert_history_stmt);
+// 	query.bind(1, session_id);
+// 	query.bind(2, history_id);
+// 	// TODO: don't need this if it's part of the session_ids table
+// 	query.bind(3, ppid);
+// 	query.bind(4, status_code);
+// 	query.bind(5, ts);
+// 	query.bind(6, current_user);
+// 	query.bind(7, current_wd);
+// 	query.bind(8, raw_history);
+// 	query.exec();
+// }
+
+// static int new_insert_command(CLI::App& app) {
+// 	try {
+// 		// Pedantically guard against writing to the real database.
+// 		// TODO: Remove this once testing is done.
+// 		std::string dbname;
+// 		if (use_test_database()) {
+// 			dbname = "test.sqlite3";
+// 		} else {
+// 			dbname = user_data_dir() / "histdb" / "data" / HISTDB_NAME;
+// 		}
+// 		SQLite::Database db = open_database(dbname);
+//
+// 		// auto ts = format_time(std::chrono::system_clock::now());
+// 		// auto ppid = getppid();
+// 		// SQLite::Statement query(db, insert_history_stmt);
+//
+// 		insert_history_record(db);
+// 		return EXIT_SUCCESS;
+//
+// 	} catch (const SQLite::Exception& e) {
+// 		int ext = e.getExtendedErrorCode();
+// 		if (ext >= 0) {
+// 			std::cerr << "sqlite: " << e.getErrorCode() << "." << ext << ": "
+// 				<< e.getErrorStr() << std::endl;
+// 		} else {
+// 			std::cerr << "sqlite: " << e.getErrorCode() << ": "
+// 				<< e.getErrorStr() << std::endl;
+// 		}
+// 	} catch (const std::exception& e) {
+// 		std::cerr << "error: " << e.what() << std::endl;
+// 	}
+// 	return EXIT_FAILURE;
+// }
+
+/// Check for an existing file (returns error message if check fails)
+class RawHistoryValidator : public CLI::Validator {
+  public:
+    RawHistoryValidator() : Validator("RAW_HISTORY") {
+        func_ = [](std::string &raw) {
+			char *end{nullptr};
+			int64_t history_id = std::strtoll(raw.data(), &end, 10);
+			if (history_id <= 0) {
+				return absl::StrCat("non-positive: HISTORY_ID: ", history_id);
+			}
+			if (!end || !*end) {
+				return std::string("empty argument: RAW_HISTORY");
+			}
+            return std::string();
+        };
+    }
+};
+
+int root_command(int argc, char * const argv[]) {
+	// App
+
+	CLI::App app("histdb");
+	app.add_option("-d,--debug", verbose, "print debug output (not supported)");
+
+	// TODO: do we need this if we have the envname() option?
+	use_prod_database = get_env_bool(HISTDB_PROD);
+	app.add_flag("-p,--prod", use_prod_database, "use production database")
+		->envname(std::string(HISTDB_PROD));
+
+	// Session
+
+	App::App *session = app.add_subcommand("session", "return a new session id");
+	session->add_flag("-e,--eval", print_eval,
+		"print the session id as a statment that can be evaluated by bash");
+
+	// Info
+	app.add_subcommand("info", "print information about the histdb database");
+
+	// Insert
+
+	CLI::App *insert = app.add_subcommand("insert", "insert a history entry");
+
+	insert->add_option("-s,--session", "session id (required)")
+		->required()
+		->check(CLI::PositiveNumber);
+
+	insert->add_option("-c,--status-code", "command status/exit code (required)")
+		->required()
+		->check(CLI::Number);
+
+	// Positional "history" argument
+	// TODO: validate that it matches `^\d+\s+\w+`
+	insert->add_option("history", "raw history")->required();
+	// TODO: add "boot-id"
+
+	for(auto *subc : app.get_subcommands(nullptr)) {
+		subc->add_flag("-p,--prod", use_prod_database, "use production database")
+			->envname(std::string(HISTDB_PROD));
+	}
+	// std::cout << "num subcommands: " << std::to_string(app.get_subcommands(nullptr).size()) << std::endl;
+	CLI11_PARSE(app, argc, argv);
+
+	if (app.got_subcommand("insert")) {
+		// TODO: run insert logic
+		std::cout << "subcommand: insert" << std::endl;
+	} else if (app.got_subcommand("session")) {
+		std::cout << "subcommand: session" << std::endl;
+	}
+
+	// CLI::App *dump = app.add_subcommand("dump");
+	// dump->add_flag(std::string flag_name)
+
+	CLI::Option *sopt = insert->get_option("--session");
+	CLI::Option *hopt = insert->get_option("history");
+	CLI::Option *popt = app.get_option("--prod");
+	std::cout << "session: " << std::to_string(sopt->as<int>()) << std::endl;
+	std::cout << "history: " << hopt->as<std::string>() << std::endl;
+	std::cout << "prod: " << (use_prod_database ? "true" : "false") << std::endl;
+	bool use_prod = popt->as<bool>();
+	std::cout << "prod (flag): " << (use_prod ? "true" : "false") << std::endl;
+	std::cout << "eval: " << (print_eval ? "true" : "false") << std::endl;
+
+	return 0;
+}
+
 int main(int argc, char * const argv[]) {
+	// WARN WARN WARN WARN WARN WARN WARN WARN
+	return root_command(argc, argv);
+
 	if (argc <= 1) {
 		root_usage(std::cerr);
 		return EXIT_FAILURE;
