@@ -7,6 +7,14 @@ project(
 	VERSION ${CMAKE_PROJECT_VERSION}
 	LANGUAGES CXX)
 
+# Optionally set things like CMAKE_CXX_STANDARD, CMAKE_POSITION_INDEPENDENT_CODE here
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_CXX_STANDARD)
+	set(CMAKE_CXX_STANDARD 17)
+elseif(CMAKE_CXX_STANDARD LESS 17)
+	message(WARNING "CMAKE_CXX_STANDARD has been set to '${CMAKE_CXX_STANDARD}' which is lower than the minimum required standard (c++17).")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_definitions(SQLITECPP_ENABLE_ASSERT_HANDLER)
