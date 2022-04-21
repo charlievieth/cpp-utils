@@ -36,6 +36,7 @@ endif ()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(USE_SYSTEM_ABSEIL "Use the system installed version of abseil." ON)
+option(USE_SYSTEM_CLI11 "Use the system installed version of CLI11." OFF)
 option(USE_SYSTEM_SQLITECPP "Use the system installed version of SqliteCpp." OFF)
 
 # Superbuild variables for sub projects
@@ -56,6 +57,7 @@ ExternalProject_Add(HistdbSource
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         DEPENDS
             absl_dependency
+            cli11_dependency
             sqlitecpp_dependency
         CMAKE_ARGS
             -DPKG_CONFIG_EXECUTABLE:PATH=${PKG_CONFIG_EXECUTABLE}

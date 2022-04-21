@@ -23,6 +23,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
 
 find_package(absl REQUIRED)
+find_package(CLI11 REQUIRED)
 find_package(SQLiteCpp REQUIRED)
 
 # WARN: this does not seem to work
