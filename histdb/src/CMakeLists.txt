@@ -31,9 +31,10 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DSQLITECPP_ENABLE_ASSERT_HANDLER")
 # set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
 # set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
 
-find_package(absl REQUIRED)
-find_package(CLI11 REQUIRED)
-find_package(SQLiteCpp REQUIRED)
+# WARN: this finds SYSTEM libraries - not our third-party ones
+# find_package(absl REQUIRED)
+# find_package(CLI11 REQUIRED)
+# find_package(SQLiteCpp REQUIRED)
 
 # WARN: this does not seem to work
 # include(CheckIncludeFile)
@@ -48,6 +49,23 @@ find_package(SQLiteCpp REQUIRED)
 
 include(GNUInstallDirs) # The directory names are used in the config file
 # configure_file(config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+# message(WARNING "Adding CLI11 include directory: ${CLI11_INCLUDE_DIR}")
+
+# include(ExternalProject)
+# ExternalProject_Get_Property(cli11_dependency CLI11_INSTALL_DIR)
+
+# message(WARNING "Adding CLI11 include directory: ${CLI11_INSTALL_DIR}")
+message(WARNING "Adding CLI11 include directory: ${DEPENDENCIES_INSTALL_PREFIX}/cli11_dependency}")
+include_directories(${CMAKE_CURRENT_BINARY_DIR} "${DEPENDENCIES_INSTALL_PREFIX}/cli11_dependency")
+include_directories("${DEPENDENCIES_INSTALL_PREFIX}/cli11_dependency/include")
+
+# message(WARNING "Adding absl include directory: ${DEPENDENCIES_INSTALL_PREFIX}/absl_dependency}")
+# include_directories(${CMAKE_CURRENT_BINARY_DIR} "${DEPENDENCIES_INSTALL_PREFIX}/absl_dependency")
+# include_directories("${DEPENDENCIES_INSTALL_PREFIX}/absl_dependency/include")
+
+# WARN: try doing this after updating the search paths
+find_package(absl REQUIRED)
+find_package(CLI11 REQUIRED)
+find_package(SQLiteCpp REQUIRED)
 
 add_subdirectory(histdb)

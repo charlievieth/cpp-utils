@@ -1,0 +1,6 @@
+/test.sqlite3
+/test.sqlite3-journal
+/venv
+.mypy_cache
+.pytest_cache
+__pycache__

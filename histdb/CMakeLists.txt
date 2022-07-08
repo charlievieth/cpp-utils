@@ -3,9 +3,9 @@ cmake_policy(VERSION 3.12)
 
 # set the project name
 project(
-	histdb
-	VERSION 0.1
-        LANGUAGES C CXX)
+    histdb
+    VERSION 0.1
+    LANGUAGES C CXX)
 
 # Optionally set things like CMAKE_CXX_STANDARD, CMAKE_POSITION_INDEPENDENT_CODE here
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,9 @@ ExternalProject_Add(HistdbSource
             absl_dependency
             cli11_dependency
             sqlitecpp_dependency
+        # Always rebuild histdb (since that's what we're working on)
+        BUILD_ALWAYS
+            1
         CMAKE_ARGS
             -DPKG_CONFIG_EXECUTABLE:PATH=${PKG_CONFIG_EXECUTABLE}
         CMAKE_CACHE_ARGS
@@ -81,7 +84,14 @@ ExternalProject_Add(HistdbSource
             -DCMAKE_INSTALL_LIBDIR:PATH=${CMAKE_INSTALL_LIBDIR}
             -DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
             -DROOT_INSTALL_PREFIX:PATH=${CMAKE_INSTALL_PREFIX}
+            -DDEPENDENCIES_INSTALL_PREFIX:STRING=${DEPENDENCIES_INSTALL_PREFIX} # WARN
+            -Dabsl_DIR:STRING=${DEPENDENCIES_INSTALL_PREFIX}/absl_dependency/lib/cmake/absl # WARN
+            # -DSQLiteCpp_DIR:
         )
+
+# build/subprojects/Build/absl_dependency/CMakeFiles/Export/lib/cmake/absl/
+# build/subprojects/Install/absl_dependency/include/absl/
+# build/subprojects/Install/absl_dependency/lib/cmake/absl/
 
 # Install the project artifacts from the staged directory
 include(GNUInstallDirs)
